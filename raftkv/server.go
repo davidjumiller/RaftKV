@@ -24,32 +24,32 @@ type LogEntry struct {
 
 }
 
-type ServerConfig struct {
+type KVServerConfig struct {
 	// Values Read from config file
 }
 
-type Server struct {
+type KVServer struct {
 	isLeader	bool
 	serverList	[]string
 	log 		[]LogEntry
 	numServers	uint8
 }
 
-func NewServer() *Server {
-	return &Server{
+func NewServer() *KVServer {
+	return &KVServer{
 		isLeader: false,
 		serverList: []string{},
 		log: []LogEntry{},
 	}
 }
 
-func (s *Server) Start() error {
+func (kvs *KVServer) Start() error {
 	return nil
 }
 
-func (s *Server) Get(getArgs *GetArgs, getRes *GetRes) error {
+func (kvs *KVServer) Get(getArgs *GetArgs, getRes *GetRes) error {
 
-	if s.isLeader {
+	if kvs.isLeader {
 		// Access personal storage, retrieve value
 	} else {
 		// Send Get request to Leader
@@ -59,9 +59,9 @@ func (s *Server) Get(getArgs *GetArgs, getRes *GetRes) error {
 	return nil
 }
 
-func (s *Server) Put(putArgs *PutArgs, putRes *PutRes) error {
+func (kvs *KVServer) Put(putArgs *PutArgs, putRes *PutRes) error {
 
-	if s.isLeader {
+	if kvs.isLeader {
 		// Modify personal storage
 		// Modify log
 		// Disseminate log to other servers
