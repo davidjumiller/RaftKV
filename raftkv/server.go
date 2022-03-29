@@ -1,10 +1,7 @@
 package raftkv
 
 import (
-	"cs.ubc.ca/cpsc416/p1/raftkv"
-	"cs.ubc.ca/cpsc416/p1/util"
-	"cs.ubc.ca/cpsc416/p1/kvslib"
-	"github.com/DistributedClocks/tracing"
+
 )
 
 type GetArgs struct {
@@ -23,7 +20,7 @@ type PutRes struct {
 
 }
 
-type LogEntry {
+type LogEntry struct {
 
 }
 
@@ -41,30 +38,30 @@ type Server struct {
 func NewServer() *Server {
 	return &Server{
 		isLeader: false,
-		serverList []string{},
+		serverList: []string{},
 		log: []LogEntry{},
 	}
 }
 
 func (s *Server) Start() error {
-
+	return nil
 }
 
 func (s *Server) Get(getArgs *GetArgs, getRes *GetRes) error {
 
-	if isLeader {
+	if s.isLeader {
 		// Access personal storage, retrieve value
 	} else {
 		// Send Get request to Leader
 		// Receive value and send to client
 	}
 
-
+	return nil
 }
 
 func (s *Server) Put(putArgs *PutArgs, putRes *PutRes) error {
 
-	if isLeader {
+	if s.isLeader {
 		// Modify personal storage
 		// Modify log
 		// Disseminate log to other servers
@@ -72,4 +69,5 @@ func (s *Server) Put(putArgs *PutArgs, putRes *PutRes) error {
 		// Send Put request to leader
 	}
 
+	return nil
 }
