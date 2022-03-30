@@ -33,12 +33,12 @@ func main() {
 	util.CheckErr(err, "Error reading client config: %v\n", err)
 
 	// Put a key-value pair
-	op, err := client.Put(tracer, "clientID1", "key2", "value2")
-	util.CheckErr(err, "Error putting value %v, opId: %v\b", err, op)
+	err = client.Put(tracer, "clientID1", "key2", "value2")
+	util.CheckErr(err, "Error putting value %v, opId: %v\b", err)
 
 	// Get a key's value
-	op, err = client.Get(tracer, "clientID1", "key1")
-	util.CheckErr(err, "Error getting value %v, opId: %v\b", err, op)
+	err = client.Get(tracer, "clientID1", "key1")
+	util.CheckErr(err, "Error getting value %v, opId: %v\b", err)
 
 	for i := 0; i < 2; i++ {
 		result := <-notifCh
