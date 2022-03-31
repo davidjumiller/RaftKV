@@ -2,7 +2,10 @@ package raftkv
 
 import (
 	"fmt"
+	"math/rand"
 	"sync"
+
+	"cs.ubc.ca/cpsc416/p1/util"
 )
 
 type ApplyMsg struct {
@@ -26,7 +29,7 @@ const (
 	FOLLOWER    = 0
 	CANDIDATE   = 1
 	LEADER      = 2
-	CopyEntries = 3
+	// CopyEntries = 3
 	HeartBeat   = 4
 )
 
@@ -65,7 +68,7 @@ type AppendEntriesReply struct {
 
 type Raft struct {
 	mu sync.Mutex // Lock to protect shared access to this peer's state
-	// peers     []*rpcutil.ClientEnd // RPC end points of all peers
+	peers     []*util.RPCEndPoint // RPC end points of all peers
 	// persister *Persister           // Object to hold this peer's persisted state
 	selfidx int   // this peer's index into peers[]
 	dead    int32 // set by Kill()
@@ -82,6 +85,7 @@ type Raft struct {
 	matchIndex []int // For each server, the largest log index that we already sent
 
 	identity     int
+	currLeaderIdx int // the idx of current leader, will be -1 if no leader
 	peersLen     int
 	hbCount      int
 	applyCh      chan ApplyMsg
@@ -89,9 +93,13 @@ type Raft struct {
 	applyCmdLogs map[interface{}]*CommandState
 }
 
+// RequestVote endpoint
+// called when other raft instances are candidate and this instance is follower
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) error {
 }
 
+// AppendEntries endpoint
+// called by the leader of the raft
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) error {}
 
 // return currentTerm and whether this server
@@ -107,6 +115,11 @@ func (rf *Raft) GetState() RaftState {
 	return RaftState{len(rf.logs), term, isleader}
 }
 
+// Execute a command, called when the server gets a request
+func (rf *Raft) Execute(command interface{}) (RaftState, error) {
+
+}
+
 //
 // save Raft's persistent state to stable storage,
 // where it can later be retrieved after a crash and restart.
@@ -116,6 +129,7 @@ func (rf *Raft) persist() {
 
 //
 // restore previously persisted state.
+// can be left to m2/m3
 //
 func (rf *Raft) readPersist(data []byte) {
 }
@@ -123,4 +137,29 @@ func (rf *Raft) readPersist(data []byte) {
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {}
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
+}
+
+func (rf *Raft) setToFollower() {
+	rf.identity = FOLLOWER
+}
+
+// apply the logs entries that has committed
+func (rf *Raft) apply() {
+}
+
+// provide a random timeout value
+// for raft it's normally between 150ms - 300ms
+func randomTimeout(min, max int) int {
+	return rand.Intn(max-min) + min
+}
+
+// init and start a raft instance
+func Start(peers []*util.RPCEndPoint, selfidx int,
+	persister *Persister, applyCh chan ApplyMsg) *Raft
+	{}
+
+// election, should be called in a goroutine, only called when the raft instance is in candidate state
+// @params: channel for passing msg if win the election
+func (rf *Raft) DoElection(wonCh chan int, wgp *sync.WaitGroup) {
+
 }
