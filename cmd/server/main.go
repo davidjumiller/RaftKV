@@ -12,5 +12,5 @@ func main() {
 	raft := raftkv.NewRaft() // Dummy name, depends on raft implementation
 	server := raftkv.NewServer()
 	server.Start(raft /*  +Config Values */)
-	raft.Start(server /* +Config Values */)
+	raft.Start(/* +Config Values */)
 }
