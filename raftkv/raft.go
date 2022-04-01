@@ -304,7 +304,7 @@ func (rf *Raft) sendRequestVote(serverIdx int, args *RequestVoteArgs, reply *Req
 	}
 
 	if reply.Term > rf.currentTerm {
-		rf.setToFollower(args.Term)
+		rf.setToFollower(reply.Term)
 		return
 	}
 
@@ -377,7 +377,7 @@ func (rf *Raft) setToLeader() {
 	}
 
 	// TODO: broadcast appendentries
-	// rf.broadcastAppendEntries()
+	rf.broadcastAppendEntries()
 }
 
 // apply the logs entries that has committed
@@ -415,7 +415,7 @@ func randomTimeout(min, max int) int {
 // hb into this channel
 //
 func Start(peers []*util.RPCEndPoint, selfidx int,
-	persister *util.Persister, applyCh chan ApplyMsg, hbCh chan HBMsg) *Raft {
+	persister *util.Persister, applyCh chan ApplyMsg) *Raft {
 	rf := &Raft{}
 	rf.dead = false
 	rf.peers = peers
@@ -423,7 +423,6 @@ func Start(peers []*util.RPCEndPoint, selfidx int,
 	rf.selfidx = selfidx
 	rf.currLeaderIdx = -1
 	rf.applyCh = applyCh
-	rf.hbCh = hbCh
 
 	fmt.Printf("----- %v Start -----", rf.selfidx)
 	rf.votedFor = -1
@@ -436,6 +435,7 @@ func Start(peers []*util.RPCEndPoint, selfidx int,
 	rf.nextIndex = make([]int, rf.peersLen)
 	rf.matchIndex = make([]int, rf.peersLen)
 	rf.applyCmdLogs = make(map[interface{}]*CommandState)
+	rf.hbCh = make(chan HBMsg, rf.peersLen)
 
 	rf.resetChannels()
 
