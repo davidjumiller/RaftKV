@@ -122,6 +122,39 @@ func (rf *Raft) resetChannels() {
 // RequestVote endpoint
 // called when other raft instances are candidate and this instance is follower
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) error {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	reply.Term = rf.currentTerm
+	reply.VoteGranted = false
+
+	if args.Term < rf.currentTerm {
+		return nil
+	}
+
+	if args.Term > rf.currentTerm {
+		rf.setToFollower(args.Term)
+		return nil
+	}
+
+	if (rf.votedFor < 0 || rf.votedFor == args.CandidateId) && rf.checkLogConsistency(args.LastLogIndex, args.LastLogTerm) {
+		reply.Term = rf.currentTerm
+		reply.VoteGranted = true
+
+		rf.votedFor = args.CandidateId
+		rf.voteCh <- true
+	}
+
+	return nil
+
+}
+
+func (rf *Raft) checkLogConsistency(cLastIdx int, cLastTerm int) bool {
+	if cLastTerm == rf.currentTerm {
+		return cLastIdx >= len(rf.logs)-1
+	}
+
+	return cLastTerm > rf.currentTerm
 }
 
 // AppendEntries endpoint
@@ -191,6 +224,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 		go rf.apply()
 	}
+
+	return nil
 
 }
 
