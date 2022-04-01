@@ -4,7 +4,6 @@ import (
 	"container/list"
 	"cs.ubc.ca/cpsc416/p1/util"
 	"github.com/DistributedClocks/tracing"
-	"math"
 	"net"
 	"net/rpc"
 	"sync"
@@ -32,16 +31,9 @@ type Put struct {
 	Value    string
 }
 
-type PutResultRecvd struct {
-	OpId uint32
-	GId  uint64
-	Key  string
-}
-
 type PutArgs struct {
 	ClientId     string
 	OpId         uint32
-	GId          uint64
 	Key          string
 	Value        string
 	Token        tracing.TracingToken
@@ -50,7 +42,6 @@ type PutArgs struct {
 
 type PutRes struct {
 	OpId   uint32
-	GId    uint64
 	Key    string
 	Value  string
 	PToken tracing.TracingToken
@@ -84,7 +75,6 @@ type GetArgs struct {
 
 type GetRes struct {
 	OpId   uint32
-	GId    uint64
 	Key    string
 	Value  string // Note: this should be "" if a Put for this key does not exist
 	GToken tracing.TracingToken
@@ -95,7 +85,6 @@ type NotifyChannel chan ResultStruct
 
 type ResultStruct struct {
 	OpId   uint32
-	GId    uint64
 	Result string
 }
 
@@ -116,8 +105,7 @@ type KVS struct {
 	LastPutOpId       uint32            // int representing last op id assigned to a put
 	LastPutResultOpId uint32            // int representing the op id of the last put result received
 	BufferedGets      map[string]*list.List
-	LowerOpId         uint32
-	UpperOpId         uint32
+	OpId              uint32
 	AliveCh           chan int
 	Conn              *net.TCPConn
 	Client            *rpc.Client
@@ -132,8 +120,7 @@ func NewKVS() *KVS {
 		LastPutOpId:       0,
 		LastPutResultOpId: 0,
 		BufferedGets:      make(map[string]*list.List),
-		LowerOpId:         0,
-		UpperOpId:         uint32(math.Pow(2, 16)),
+		OpId:              0,
 		RTT:               3 * time.Second,
 		AliveCh:           make(chan int),
 	}
@@ -175,11 +162,9 @@ func (d *KVS) Get(tracer *tracing.Tracer, key string) error {
 	d.Mutex.RLock()
 	numOutstanding, exists := d.Puts[key]
 	d.Mutex.RUnlock()
-	var localOpId uint32
+	localOpId := d.OpId
+	d.OpId++
 	if exists {
-		localOpId = d.UpperOpId
-		d.UpperOpId++
-
 		if numOutstanding > 0 {
 			// Outstanding put(s); buffer for later
 			getArgs := d.createGetArgs(tracer, key, localOpId)
@@ -190,18 +175,10 @@ func (d *KVS) Get(tracer *tracing.Tracer, key string) error {
 			d.BufferedGets[key].PushBack(bufferedGet)
 			return nil
 		}
-	} else {
-		localOpId = d.LowerOpId
-		d.LowerOpId++
-		if d.LowerOpId == uint32(math.Pow(2, 16)) {
-			temp := d.UpperOpId
-			d.LowerOpId = temp
-			d.UpperOpId = (uint32(math.Pow(2, 32)) - d.LowerOpId) / 2
-		}
 	}
 	getArgs := d.createGetArgs(tracer, key, localOpId)
-	d.sendGet(getArgs) // TODO change to goroutine
-	return nil         // TODO change return value
+	d.sendGet(getArgs) // TODO change to goroutine?
+	return nil         // TODO change return value?
 
 }
 
@@ -212,9 +189,9 @@ func (d *KVS) Get(tracer *tracing.Tracer, key string) error {
 // The returned value must be delivered asynchronously via the notify-channel channel returned in the Start call.
 func (d *KVS) Put(tracer *tracing.Tracer, key string, value string) error {
 	// Should return OpId or error
-	localOpId := d.UpperOpId
+	localOpId := d.OpId
 	d.LastPutOpId = localOpId
-	d.UpperOpId++
+	d.OpId++
 
 	// Update map to have an outstanding put
 	d.Mutex.Lock()
@@ -235,7 +212,6 @@ func (d *KVS) Put(tracer *tracing.Tracer, key string, value string) error {
 		ClientId:     d.ClientId,
 		OpId:         localOpId,
 		Key:          key,
-		GId:          0,
 		Value:        value,
 		Token:        trace.GenerateToken(),
 		ClientIPPort: d.LocalServerAddr, // Receives result from tail
@@ -291,13 +267,11 @@ func makeClient(localAddr string, remoteAddr string) (*net.TCPConn, *rpc.Client)
 // Creates GetArgs struct for a new Get
 func (d *KVS) createGetArgs(tracer *tracing.Tracer, key string, localOpId uint32) *GetArgs {
 	trace := tracer.CreateTrace()
-	serverAddr := d.ServerList[d.RemoteAddrIndex]
 	getArgs := &GetArgs{
-		ClientId:     d.ClientId,
-		OpId:         localOpId,
-		Key:          key,
-		GToken:       trace.GenerateToken(),
-		ClientIPPort: serverAddr, // Receives result from tail
+		ClientId: d.ClientId,
+		OpId:     localOpId,
+		Key:      key,
+		GToken:   trace.GenerateToken(),
 	}
 	return getArgs
 }
@@ -317,7 +291,6 @@ func (d *KVS) sendGet(getArgs *GetArgs) {
 		case <-goCall.Done:
 			resultStruct := ResultStruct{
 				OpId:   0,
-				GId:    0,
 				Result: getResult.Value,
 			}
 			d.NotifyCh <- resultStruct
