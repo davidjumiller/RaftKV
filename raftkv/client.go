@@ -287,14 +287,12 @@ func (d *KVS) sendGet(getArgs *GetArgs) {
 	var getResult GetRes
 	goCall := d.Client.Go("Server.Get", getArgs, &getResult, nil)
 	for {
-		select {
-		case <-goCall.Done:
-			resultStruct := ResultStruct{
-				OpId:   0,
-				Result: getResult.Value,
-			}
-			d.NotifyCh <- resultStruct
+		<-goCall.Done
+		resultStruct := ResultStruct{
+			OpId:   getArgs.OpId,
+			Result: getResult.Value,
 		}
+		d.NotifyCh <- resultStruct
 	}
 	//go handleGetTimeout(d, getArgs, conn, client) // M2: handle Get timout
 }
