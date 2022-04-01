@@ -11,10 +11,7 @@ import (
 	"time"
 )
 
-type Client struct {
-	clientId string
-}
-
+// ClientEnd represents a client endpoint
 type ClientEnd struct {
 	Addr   string
 	Client *rpc.Client
@@ -142,35 +139,15 @@ func NewKVS() *KVS {
 	}
 }
 
-type RemoteKVS struct {
+type Client struct {
 	KVS *KVS
 }
 
-func NewRemoteKVS() *RemoteKVS {
-	return &RemoteKVS{
-		KVS: nil,
-	}
-}
-
-func MakeClient(servers []*ClientEnd) *Client {
-	return nil
-}
-
-func (c *Client) Start(key string) (NotifyChannel, error) {
-	return nil, nil
-}
-func (c *Client) Get(key string) error {
-	return nil
-}
-func (c *Client) Put(key string, value string) error {
-	return nil
-}
-
-// Start Starts the instance of KVS to use for connecting to the system with the given coord's IP:port.
+// Start Starts the instance of Client to use for connecting to the system.
 // The returned notify-channel channel must have capacity ChCapacity and must be used by kvslib to deliver
 // all get/put output notifications. ChCapacity determines the concurrency
 // factor at the client: the client will never have more than ChCapacity number of operations outstanding (pending concurrently) at any one time.
-// If there is an issue with connecting to the coord, this should return an appropriate err value, otherwise err should be set to nil.
+// If there is an issue with connecting to the system, this should return an appropriate err value, otherwise err should be set to nil.
 func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, localServerIPPort string, serverIPPortList []string, chCapacity int) (NotifyChannel, error) {
 	d.NotifyCh = make(NotifyChannel, chCapacity)
 	d.KTrace = localTracer.CreateTrace()
@@ -178,26 +155,14 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, localServerIPP
 	d.LocalServerAddr = localServerIPPort
 	d.Tracer = localTracer
 	d.ServerList = serverIPPortList
-	remote := NewRemoteKVS()
-	remote.KVS = d
 
 	// Tracing
 	d.KTrace.RecordAction(KvslibStart{clientId})
 
-	// Setup RPC
-	err := rpc.RegisterName("KVS", remote)
-	if err != nil {
-		return nil, err
-	}
 	d.RemoteAddrIndex = 0 // Connect with the first server on the list
 	serverAddr := d.ServerList[d.RemoteAddrIndex]
 	d.Conn, d.Client = makeClient(d.LocalServerAddr, serverAddr)
 	// M2: handle failed/non-responsive servers
-
-	// Receive calls from the server
-	d.ServerListener, err = startRPCListener(serverAddr)
-	util.CheckErr(err, "Could not start serverAddr listener in kvslib Start")
-	go remote.serveRequests()
 	return d.NotifyCh, nil
 }
 
@@ -206,7 +171,7 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, localServerIPP
 // this should return an appropriate err value, otherwise err should be set to nil. Note that this call is non-blocking.
 // The returned value must be delivered asynchronously to the client via the notify-channel channel returned in the Start call.
 // The value OpId is used to identify this request and associate the returned value with this request.
-func (d *KVS) Get(tracer *tracing.Tracer, clientId string, key string) error {
+func (d *KVS) Get(tracer *tracing.Tracer, key string) error {
 	d.Mutex.RLock()
 	numOutstanding, exists := d.Puts[key]
 	d.Mutex.RUnlock()
@@ -217,7 +182,7 @@ func (d *KVS) Get(tracer *tracing.Tracer, clientId string, key string) error {
 
 		if numOutstanding > 0 {
 			// Outstanding put(s); buffer for later
-			getArgs := d.createGetArgs(tracer, clientId, key, localOpId)
+			getArgs := d.createGetArgs(tracer, key, localOpId)
 			bufferedGet := BufferedGet{
 				Args:    getArgs,
 				PutOpId: d.LastPutOpId,
@@ -234,9 +199,9 @@ func (d *KVS) Get(tracer *tracing.Tracer, clientId string, key string) error {
 			d.UpperOpId = (uint32(math.Pow(2, 32)) - d.LowerOpId) / 2
 		}
 	}
-	getArgs := d.createGetArgs(tracer, clientId, key, localOpId)
-	d.sendGet(getArgs)
-	return nil
+	getArgs := d.createGetArgs(tracer, key, localOpId)
+	d.sendGet(getArgs) // TODO change to goroutine
+	return nil         // TODO change return value
 
 }
 
@@ -245,7 +210,7 @@ func (d *KVS) Get(tracer *tracing.Tracer, clientId string, key string) error {
 // this should return an appropriate err value, otherwise err should be set to nil. Note that this call is non-blocking.
 // The value OpId is used to identify this request and associate the returned value with this request.
 // The returned value must be delivered asynchronously via the notify-channel channel returned in the Start call.
-func (d *KVS) Put(tracer *tracing.Tracer, clientId string, key string, value string) error {
+func (d *KVS) Put(tracer *tracing.Tracer, key string, value string) error {
 	// Should return OpId or error
 	localOpId := d.UpperOpId
 	d.LastPutOpId = localOpId
@@ -263,11 +228,11 @@ func (d *KVS) Put(tracer *tracing.Tracer, clientId string, key string, value str
 	d.Mutex.Unlock()
 
 	trace := tracer.CreateTrace()
-	trace.RecordAction(Put{clientId, localOpId, key, value})
+	trace.RecordAction(Put{d.ClientId, localOpId, key, value})
 
 	// Send put to head via RPC
 	putArgs := &PutArgs{
-		ClientId:     clientId,
+		ClientId:     d.ClientId,
 		OpId:         localOpId,
 		Key:          key,
 		GId:          0,
@@ -278,11 +243,8 @@ func (d *KVS) Put(tracer *tracing.Tracer, clientId string, key string, value str
 	d.Mutex.Lock()
 	d.InProgress[localOpId] = time.Now()
 	d.Mutex.Unlock()
-	var gid uint64
-	err := d.Client.Call("Server.Put", putArgs, &gid)
-	if err != nil {
-		return err
-	}
+	var putResult *PutRes
+	d.Client.Go("Server.Put", putArgs, putResult, nil)
 
 	// Result should be received from tail via KVS.PutResult()
 	//go d.handlePutTimeout(putArgs) // M2: handle Put timeout
@@ -308,55 +270,6 @@ func (d *KVS) Stop() {
 	return
 }
 
-// Serve client requests for a RemoteKVS while the KVS is alive
-func (remoteKVS *RemoteKVS) serveRequests() {
-	for {
-		select {
-		case <-remoteKVS.KVS.AliveCh:
-			return
-		case <-time.After(time.Second):
-			rpc.Accept(remoteKVS.KVS.ServerListener)
-		}
-	}
-}
-
-// PutResult Confirms that a Put succeeded
-// Does not reply to callee!
-func (remoteKVS *RemoteKVS) PutResult(args *PutRes, _ *interface{}) error {
-	remoteKVS.KVS.Mutex.Lock()
-	_, exists := remoteKVS.KVS.InProgress[args.OpId]
-	if !exists {
-		// Do nothing
-		return nil
-	}
-	remoteKVS.updateInProgressAndRtt(args.OpId)
-	remoteKVS.KVS.Mutex.Unlock()
-
-	trace := remoteKVS.KVS.Tracer.ReceiveToken(args.PToken)
-	trace.RecordAction(PutResultRecvd{
-		OpId: args.OpId,
-		GId:  args.GId,
-		Key:  args.Key,
-	})
-	result := ResultStruct{
-		OpId:   args.OpId,
-		GId:    args.GId,
-		Result: args.Value,
-	}
-
-	// Update data structures
-	remoteKVS.KVS.Mutex.Lock()
-	num, _ := remoteKVS.KVS.Puts[args.Key]
-	remoteKVS.KVS.Puts[args.Key] = num - 1
-	remoteKVS.KVS.LastPutResultOpId = args.OpId
-	remoteKVS.KVS.Mutex.Unlock()
-	remoteKVS.KVS.sendBufferedGets(args.Key)
-
-	// Send result
-	remoteKVS.KVS.NotifyCh <- result
-	return nil
-}
-
 // Creates and returns a TCP connection between localAddr and remoteAddr
 func makeConnection(localAddr string, remoteAddr string) *net.TCPConn {
 	localTcpAddr, err := net.ResolveTCPAddr("tcp", localAddr)
@@ -368,48 +281,6 @@ func makeConnection(localAddr string, remoteAddr string) *net.TCPConn {
 	return conn
 }
 
-// GetResult Confirms that a Get succeeded
-// Does not reply to callee!
-func (remoteKVS *RemoteKVS) GetResult(args *GetRes, _ *interface{}) error {
-	remoteKVS.KVS.Mutex.RLock()
-	_, exists := remoteKVS.KVS.InProgress[args.OpId]
-	remoteKVS.KVS.Mutex.RUnlock()
-	if !exists {
-		// Do nothing
-		return nil
-	}
-	remoteKVS.updateInProgressAndRtt(args.OpId)
-
-	trace := remoteKVS.KVS.Tracer.ReceiveToken(args.GToken)
-	trace.RecordAction(GetResultRecvd{
-		OpId:  args.OpId,
-		GId:   args.GId,
-		Key:   args.Key,
-		Value: args.Value,
-	})
-	result := ResultStruct{
-		OpId:   args.OpId,
-		GId:    args.GId,
-		Result: args.Value,
-	}
-	remoteKVS.KVS.NotifyCh <- result
-	return nil
-}
-
-// Starts an RPC listener and returns the address it is on
-func startRPCListener(rpcListenAddr string) (*net.TCPListener, error) {
-	resolvedRPCListenAddr, err := net.ResolveTCPAddr("tcp", rpcListenAddr)
-	if err != nil {
-		return nil, err
-	}
-	listener, err := net.ListenTCP("tcp", resolvedRPCListenAddr)
-	if err != nil {
-		return nil, err
-	}
-	go rpc.Accept(listener)
-	return listener, nil
-}
-
 // Creates an RPC client given between a local and remote address
 func makeClient(localAddr string, remoteAddr string) (*net.TCPConn, *rpc.Client) {
 	conn := makeConnection(localAddr, remoteAddr)
@@ -418,11 +289,11 @@ func makeClient(localAddr string, remoteAddr string) (*net.TCPConn, *rpc.Client)
 }
 
 // Creates GetArgs struct for a new Get
-func (d *KVS) createGetArgs(tracer *tracing.Tracer, clientId string, key string, localOpId uint32) *GetArgs {
+func (d *KVS) createGetArgs(tracer *tracing.Tracer, key string, localOpId uint32) *GetArgs {
 	trace := tracer.CreateTrace()
 	serverAddr := d.ServerList[d.RemoteAddrIndex]
 	getArgs := &GetArgs{
-		ClientId:     clientId,
+		ClientId:     d.ClientId,
 		OpId:         localOpId,
 		Key:          key,
 		GToken:       trace.GenerateToken(),
@@ -439,9 +310,19 @@ func (d *KVS) sendGet(getArgs *GetArgs) {
 	d.Mutex.Lock()
 	d.InProgress[getArgs.OpId] = time.Now()
 	d.Mutex.Unlock()
-	d.Client.Go("Server.Get", getArgs, nil, nil)
-
-	// Result should be received from tail via KVS.GetResult()
+	var getResult GetRes
+	goCall := d.Client.Go("Server.Get", getArgs, &getResult, nil)
+	for {
+		select {
+		case <-goCall.Done:
+			resultStruct := ResultStruct{
+				OpId:   0,
+				GId:    0,
+				Result: getResult.Value,
+			}
+			d.NotifyCh <- resultStruct
+		}
+	}
 	//go handleGetTimeout(d, getArgs, conn, client) // M2: handle Get timout
 }
 
@@ -461,10 +342,10 @@ func (d *KVS) sendBufferedGets(key string) {
 }
 
 // Updates a KVS's estimated RTT based on an operation's RTT
-func (remoteKVS *RemoteKVS) updateInProgressAndRtt(opId uint32) {
-	remoteKVS.KVS.Mutex.Lock()
-	newRtt := time.Now().Sub(remoteKVS.KVS.InProgress[opId])
-	remoteKVS.KVS.RTT = (remoteKVS.KVS.RTT + newRtt) / 2
-	delete(remoteKVS.KVS.InProgress, opId)
-	remoteKVS.KVS.Mutex.Unlock()
+func (client *Client) updateInProgressAndRtt(opId uint32) {
+	client.KVS.Mutex.Lock()
+	newRtt := time.Now().Sub(client.KVS.InProgress[opId])
+	client.KVS.RTT = (client.KVS.RTT + newRtt) / 2
+	delete(client.KVS.InProgress, opId)
+	client.KVS.Mutex.Unlock()
 }
