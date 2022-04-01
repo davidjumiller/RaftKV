@@ -34,7 +34,6 @@ const (
 	CANDIDATE              = 1
 	LEADER                 = 2
 	// CopyEntries = 3
-	HeartBeat = 4
 )
 
 type RaftState struct {
@@ -66,9 +65,11 @@ type AppendEntriesArgs struct {
 }
 
 type AppendEntriesReply struct {
-	Term         int  // current term, used by the leader to update itself
-	Success      bool // true if PrevLogIndex and PrevLogTerm is matched (for consistency)
-	PrevLogIndex int
+	Term          int  // current term, used by the leader to update itself
+	Success       bool // true if PrevLogIndex and PrevLogTerm is matched (for consistency)
+	PrevLogIndex  int
+	ConflictTerm  int // -1 if no conflict, otherwise it's the smallest term number where leader doesn't agree with the follower
+	ConflictIndex int // -1 if no conflict, otherwise it's the smallest log index of conflict
 }
 
 type HBMsg struct {
@@ -125,7 +126,73 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) erro
 
 // AppendEntries endpoint
 // called by the leader of the raft
-func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) error {}
+func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) error {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	// init reply
+	reply.Term = rf.currentTerm
+	reply.Success = false
+	reply.ConflictIndex = -1
+	reply.ConflictTerm = -1
+
+	if args.Term < rf.currentTerm {
+		return nil
+	}
+
+	if args.Term > rf.currentTerm {
+		rf.setToFollower(args.Term)
+	}
+
+	lastIndex := len(rf.logs) - 1
+	rf.hbCh <- HBMsg{}
+
+	// follower's log is shorter than the leader
+	if args.PrevLogIndex > lastIndex {
+		reply.ConflictIndex = lastIndex + 1
+		return nil
+	}
+
+	// check if the term matches
+	if cfTerm := rf.logs[args.PrevLogIndex].Term; cfTerm != args.PrevLogTerm {
+		reply.ConflictTerm = cfTerm
+		for i := args.PrevLogIndex; i >= 0 && rf.logs[i].Term == cfTerm; i-- {
+			reply.ConflictIndex = i
+		}
+		reply.Success = false
+		return nil
+	}
+
+	// check the args.Entries to see if it matches with rf.logs
+	// break when it finds the first
+	i, j := args.PrevLogIndex+1, 0
+	for ; i <= lastIndex && j < len(args.Entries); i, j = i+1, j+1 {
+		if rf.logs[i].Term != args.Entries[j].Term {
+			break
+		}
+	}
+
+	// truncate the log, and use args.Entries to fill in the log
+	// to keep log consistency
+	rf.logs = rf.logs[:i]
+	args.Entries = args.Entries[j:]
+	rf.logs = append(rf.logs, args.Entries...)
+
+	reply.Success = true
+
+	// update commit index to min(leaderCommit, lastIndex)
+	if args.LeaderCommit > rf.commitIndex {
+		lastIndex = len(rf.logs) - 1
+		if args.LeaderCommit < lastIndex {
+			rf.commitIndex = args.LeaderCommit
+		} else {
+			rf.commitIndex = lastIndex
+		}
+
+		go rf.apply()
+	}
+
+}
 
 // return currentTerm and whether this server
 // believes it is the leader.
@@ -252,7 +319,7 @@ func (rf *Raft) setToCandidate(identityType IdentityType) {
 
 	// TODO: implment persist and broadcast
 	// rf.persist()
-	// rf.broadcastRequestVote()
+	rf.broadcastRequestVote()
 }
 
 func (rf *Raft) setToLeader() {
