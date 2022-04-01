@@ -80,7 +80,7 @@ type GetRes struct {
 	GToken tracing.TracingToken
 }
 
-// NotifyChannel is used for notifying the client about a mining result.
+// NotifyChannel is used for notifying the client about a result for an operation.
 type NotifyChannel chan ResultStruct
 
 type ResultStruct struct {
@@ -286,14 +286,12 @@ func (d *KVS) sendGet(getArgs *GetArgs) {
 	d.Mutex.Unlock()
 	var getResult GetRes
 	goCall := d.Client.Go("Server.Get", getArgs, &getResult, nil)
-	for {
-		<-goCall.Done
-		resultStruct := ResultStruct{
-			OpId:   getArgs.OpId,
-			Result: getResult.Value,
-		}
-		d.NotifyCh <- resultStruct
+	<-goCall.Done
+	resultStruct := ResultStruct{
+		OpId:   getArgs.OpId,
+		Result: getResult.Value,
 	}
+	d.NotifyCh <- resultStruct
 	//go handleGetTimeout(d, getArgs, conn, client) // M2: handle Get timout
 }
 
