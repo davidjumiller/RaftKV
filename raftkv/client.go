@@ -148,7 +148,7 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, localServerIPP
 
 	d.RemoteAddrIndex = 0 // Connect with the first server on the list
 	serverAddr := d.ServerList[d.RemoteAddrIndex]
-	d.Conn, d.Client = makeClient(d.LocalServerAddr, serverAddr)
+	d.Conn, d.Client = util.MakeClient(d.LocalServerAddr, serverAddr)
 	// M2: handle failed/non-responsive servers
 	return d.NotifyCh, nil
 }
@@ -244,24 +244,6 @@ func (d *KVS) Stop() {
 	d.AliveCh <- 1
 	close(d.AliveCh)
 	return
-}
-
-// Creates and returns a TCP connection between localAddr and remoteAddr
-func makeConnection(localAddr string, remoteAddr string) *net.TCPConn {
-	localTcpAddr, err := net.ResolveTCPAddr("tcp", localAddr)
-	util.CheckErr(err, "Could not resolve address: "+localAddr)
-	remoteTcpAddr, err := net.ResolveTCPAddr("tcp", remoteAddr)
-	util.CheckErr(err, "Could not resolve address: "+remoteAddr)
-	conn, err := net.DialTCP("tcp", localTcpAddr, remoteTcpAddr)
-	util.CheckErr(err, "Could not connect "+localAddr+" to "+remoteAddr)
-	return conn
-}
-
-// Creates an RPC client given between a local and remote address
-func makeClient(localAddr string, remoteAddr string) (*net.TCPConn, *rpc.Client) {
-	conn := makeConnection(localAddr, remoteAddr)
-	client := rpc.NewClient(conn)
-	return conn, client
 }
 
 // Creates GetArgs struct for a new Get
