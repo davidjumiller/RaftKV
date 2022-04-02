@@ -25,22 +25,25 @@ type Put struct {
 	Value    string
 }
 type PutArgs struct {
-	Key    string
-	Value  string
-	OpId   uint8
-	PToken tracing.TracingToken
+	ClientId string
+	Key      string
+	Value    string
+	OpId     uint8
+	PToken   tracing.TracingToken
 }
 
 type PutRes struct {
-	OpId   uint8
-	Key    string
-	Value  string
-	PToken tracing.TracingToken
+	ClientId string
+	OpId     uint8
+	Key      string
+	Value    string
+	PToken   tracing.TracingToken
 }
 
 type PutResultRecvd struct {
-	OpId uint8
-	Key  string
+	ClientId string
+	OpId     uint8
+	Key      string
 }
 
 type Get struct {
@@ -55,22 +58,25 @@ type BufferedGet struct {
 }
 
 type GetResultRecvd struct {
-	OpId  uint8
-	Key   string
-	Value string
+	ClientId string
+	OpId     uint8
+	Key      string
+	Value    string
 }
 
 type GetArgs struct {
-	Key    string
-	OpId   uint8
-	GToken tracing.TracingToken
+	ClientId string
+	Key      string
+	OpId     uint8
+	GToken   tracing.TracingToken
 }
 
 type GetRes struct {
-	OpId   uint8
-	Key    string
-	Value  string // Note: this should be "" if a Put for this key does not exist
-	GToken tracing.TracingToken
+	ClientId string
+	OpId     uint8
+	Key      string
+	Value    string // Note: this should be "" if a Put for this key does not exist
+	GToken   tracing.TracingToken
 }
 
 // NotifyChannel is used for notifying the client about a result for an operation.
@@ -185,10 +191,11 @@ func (d *KVS) Put(tracer *tracing.Tracer, key string, value string) error {
 
 	// Send put to head via RPC
 	putArgs := &PutArgs{
-		OpId:   localOpId,
-		Key:    key,
-		Value:  value,
-		PToken: trace.GenerateToken(),
+		ClientId: d.ClientId,
+		OpId:     localOpId,
+		Key:      key,
+		Value:    value,
+		PToken:   trace.GenerateToken(),
 	}
 	d.addOutstandingPut(key, putArgs)
 	go d.sendPut(localOpId, putArgs)
@@ -244,9 +251,10 @@ func (d *KVS) sendGet(getArgs *GetArgs) {
 	d.NotifyCh <- resultStruct
 	trace = d.Tracer.ReceiveToken(getArgs.GToken)
 	trace.RecordAction(GetResultRecvd{
-		OpId:  getResult.OpId,
-		Key:   getResult.Key,
-		Value: getResult.Value,
+		ClientId: d.ClientId,
+		OpId:     getResult.OpId,
+		Key:      getResult.Key,
+		Value:    getResult.Value,
 	})
 	//go handleGetTimeout(d, getArgs, conn, client) // M2: handle Get timout
 }
@@ -278,8 +286,9 @@ func (d *KVS) sendPut(localOpId uint8, putArgs *PutArgs) {
 	<-goCall.Done
 	trace := d.Tracer.ReceiveToken(putArgs.PToken)
 	trace.RecordAction(PutResultRecvd{
-		OpId: putResult.OpId,
-		Key:  putResult.Key,
+		ClientId: putResult.ClientId,
+		OpId:     putResult.OpId,
+		Key:      putResult.Key,
 	})
 	resultStruct := ResultStruct{
 		OpId:   putResult.OpId,
