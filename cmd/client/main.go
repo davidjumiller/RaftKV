@@ -40,6 +40,22 @@ func main() {
 	err = client.Get(tracer, "key1")
 	util.CheckErr(err, "Error getting value %v, opId: %v\b", err)
 
+	// Sequence of interleaved gets and puts
+	err = client.Put(tracer, "key1", "test1")
+	util.CheckErr(err, "Error putting value %v, opId: %v\b", err)
+	err = client.Get(tracer, "key1")
+	util.CheckErr(err, "Error getting value %v, opId: %v\b", err)
+	err = client.Put(tracer, "key1", "test2")
+	util.CheckErr(err, "Error putting value %v, opId: %v\b", err)
+	err = client.Get(tracer, "key1")
+	util.CheckErr(err, "Error getting value %v, opId: %v\b", err)
+	err = client.Get(tracer, "key1")
+	util.CheckErr(err, "Error getting value %v, opId: %v\b", err)
+	err = client.Put(tracer, "key1", "test3")
+	util.CheckErr(err, "Error putting value %v, opId: %v\b", err)
+	err = client.Get(tracer, "key1")
+	util.CheckErr(err, "Error getting value %v, opId: %v\b", err)
+
 	for i := 0; i < 2; i++ {
 		result := <-notifCh
 		log.Println(result)
