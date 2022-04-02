@@ -1,33 +1,33 @@
 package raftkv
 
 import (
+	"github.com/DistributedClocks/tracing"
 	"net"
 	"net/rpc"
-	"github.com/DistributedClocks/tracing"
 )
 
 type GetArgs struct {
-	Key		string
-	OpId	uint8
-	GToken	tracing.TracingToken
+	Key    string
+	OpId   uint8
+	GToken tracing.TracingToken
 }
 
 type GetRes struct {
-	Value	string
-	GToken	tracing.TracingToken
+	Value  string
+	GToken tracing.TracingToken
 }
 
 type PutArgs struct {
-	Key		string
-	Value 	string
-	OpId	uint8
-	PToken 	tracing.TracingToken
+	Key    string
+	Value  string
+	OpId   uint8
+	PToken tracing.TracingToken
 }
 
 type PutRes struct {
-	Key		string
-	Value	string
-	PToken	tracing.TracingToken
+	Key    string
+	Value  string
+	PToken tracing.TracingToken
 }
 
 type KVServerConfig struct {
@@ -35,18 +35,16 @@ type KVServerConfig struct {
 }
 
 type KVServer struct {
-	ServerAddr	string
-	ServerList	[]string
-	NumServers	uint8
-	Raft		*raftkv.Raft
-	Store 		map[string]string
+	ServerAddr string
+	ServerList []string
+	NumServers uint8
+	Raft       *Raft
+	Store      map[string]string
 }
 
 func NewServer() *KVServer {
 	return &KVServer{
-		isLeader: false,
-		serverList: []string{},
-		log: []LogEntry{},
+		ServerList: []string{},
 	}
 }
 
@@ -67,7 +65,7 @@ func (kvs *KVServer) Get(getArgs *GetArgs, getRes *GetRes) error {
 		if err != nil {
 			return err
 		}
-		getRes.Res = kvs.Store[getArgs.Key]
+		getRes.Value = kvs.Store[getArgs.Key]
 	} else {
 		conn, client, err := establishRPCConnection(kvs.ServerAddr, kvs.ServerList[raftState.LeaderId])
 		if err != nil {
@@ -77,8 +75,8 @@ func (kvs *KVServer) Get(getArgs *GetArgs, getRes *GetRes) error {
 		if err != nil {
 			return err
 		}
-		client.close()
-		conn.close()
+		client.Close()
+		conn.Close()
 	}
 
 	// TODO: Tracing
@@ -104,8 +102,8 @@ func (kvs *KVServer) Put(putArgs *PutArgs, putRes *PutRes) error {
 		if err != nil {
 			return err
 		}
-		client.close()
-		conn.close()
+		client.Close()
+		conn.Close()
 	}
 
 	// TODO: Tracing
