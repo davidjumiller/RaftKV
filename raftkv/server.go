@@ -1,68 +1,108 @@
 package raftkv
 
 import (
+	"cs.ubc.ca/cpsc416/p1/util"
+	"fmt"
+	"github.com/DistributedClocks/tracing"
 	"net"
 	"net/rpc"
-	"github.com/DistributedClocks/tracing"
 )
 
+type ServerStart struct {
+	ServerId int
+}
+
+type ServerListening struct {
+	ServerId int
+}
+
 type GetArgs struct {
-	Key		string
-	OpId	uint8
-	GToken	tracing.TracingToken
+	Key    string
+	OpId   uint8
+	GToken tracing.TracingToken
 }
 
 type GetRes struct {
-	Value	string
-	GToken	tracing.TracingToken
+	Value  string
+	GToken tracing.TracingToken
 }
 
 type PutArgs struct {
-	Key		string
-	Value 	string
-	OpId	uint8
-	PToken 	tracing.TracingToken
+	Key    string
+	Value  string
+	OpId   uint8
+	PToken tracing.TracingToken
 }
 
 type PutRes struct {
-	Key		string
-	Value	string
-	PToken	tracing.TracingToken
+	Key    string
+	Value  string
+	PToken tracing.TracingToken
 }
 
 type KVServerConfig struct {
-	ServerId			uint8
-	ServerListenAddr	string
-	RaftListenAddr		string
-	ServerAddrs			[]string // Currently, Index = ServerId
-	RaftAddrs			[]string // Also Index = ServerId
-	NumServers			uint8
+	ServerId			    int      // this server's ID; used to index into ServersList
+  ServerAddr        string   // address from which this server sends RPCs
+	ServerListenAddr	string   // address on which this server listens for RPCs
+	RaftListenAddr		string   // addresses of all possible servers in the system
+	ServerList			  []string // Currently, Index = ServerId
+	RaftList			    []string // Also Index = ServerId
+	NumServers			  uint8
 	TracingServerAddr	string
 	TracingIdentity		string
-	Secret				[]byte
+	Secret				    []byte
 }
 
 type KVServer struct {
-	ServerAddr	string
-	ServerList	[]string
-	NumServers	uint8
-	Raft		*raftkv.Raft
-	Store 		map[string]string
+	ServerId   int
+	ServerAddr string
+	ServerList []string
+	Raft       *Raft             // this server's Raft instance
+	ApplyCh    chan ApplyMsg     // channel to receive updates from Raft
+	Store      map[string]string // in-memory key-value store
+	Tracer     *tracing.Tracer
 }
 
 func NewServer() *KVServer {
 	return &KVServer{
-		isLeader: false,
-		serverList: []string{},
-		log: []LogEntry{},
+		ServerList: []string{},
+		Store:      make(map[string]string),
 	}
 }
 
-func (kvs *KVServer) Start() error {
-	return nil
+type RemoteServer struct {
+	KVServer *KVServer
 }
 
-func (kvs *KVServer) NewServerJoin() error {
+func (kvs *KVServer) Start(serverId int, serverAddr string, serverListenAddr string, serverList []string, tracer *tracing.Tracer, raft *Raft) error {
+	kvs.ServerId = serverId
+	kvs.ServerAddr = serverAddr
+	kvs.ServerList = serverList
+	kvs.Tracer = tracer
+	kvs.Raft = raft
+	kvs.ApplyCh = raft.applyCh
+
+	// Begin Server trace
+	trace := tracer.CreateTrace()
+	trace.RecordAction(ServerStart{serverId})
+
+	// Start listening for RPCs
+	rpcServer := &RemoteServer{kvs}
+	err := rpc.RegisterName("Server", rpcServer)
+	if err != nil {
+		fmt.Println("failed to register this server for RPCs")
+		return err
+	}
+	_, err = util.StartRPCListener(serverListenAddr)
+	if err != nil {
+		fmt.Println("failed to start listening for RPCs")
+		return err
+	}
+	trace.RecordAction(ServerListening{serverId})
+
+	for {
+		// Serve indefinitely
+	}
 	return nil
 }
 
@@ -75,7 +115,7 @@ func (kvs *KVServer) Get(getArgs *GetArgs, getRes *GetRes) error {
 		if err != nil {
 			return err
 		}
-		getRes.Res = kvs.Store[getArgs.Key]
+		getRes.Value = kvs.Store[getArgs.Key]
 	} else {
 		conn, client, err := establishRPCConnection(kvs.ServerAddr, kvs.ServerList[raftState.LeaderId])
 		if err != nil {
@@ -85,8 +125,8 @@ func (kvs *KVServer) Get(getArgs *GetArgs, getRes *GetRes) error {
 		if err != nil {
 			return err
 		}
-		client.close()
-		conn.close()
+		client.Close()
+		conn.Close()
 	}
 
 	// TODO: Tracing
@@ -112,8 +152,8 @@ func (kvs *KVServer) Put(putArgs *PutArgs, putRes *PutRes) error {
 		if err != nil {
 			return err
 		}
-		client.close()
-		conn.close()
+		client.Close()
+		conn.Close()
 	}
 
 	// TODO: Tracing

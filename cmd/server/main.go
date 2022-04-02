@@ -4,27 +4,37 @@ import (
 	"os"
 	"cs.ubc.ca/cpsc416/p1/raftkv"
 	"cs.ubc.ca/cpsc416/p1/util"
+	"fmt"
 	"github.com/DistributedClocks/tracing"
+	"os"
+	"strconv"
 )
 
 func main() {
-	// Config file reading
-	configFilePath := os.Args[1]
-	if configFilePath == nil {
-		configFilePath = "config/server_config.json"
-	}
+	// Get server ID from command line arg
+	serverId, err := strconv.Atoi(os.Args[1])
+	util.CheckErr(err, "failed to parse server ID")
+
+	// Read server config
+	filename := fmt.Sprintf("config/server_config_%s.json", serverId)
 	var config raftkv.KVServerConfig
-	err := util.ReadJSONConfig(configFilePath, &config)
-	util.CheckErr(err, "Error reading server config: %v\n", err)
-	// Tracing
-	stracer := tracing.NewTracer()tracing.TracerConfig{
-		ServerAddress: config.TracingServerAddr,
-		TracerIdentity: config.TracerIdentity,
-		Secret: config.Secret,
+	err = util.ReadJSONConfig(filename, &config)
+	util.CheckErr(err, "failed to locate or parse config for server %d", serverId)
+
+	// Create server tracer
+	stracer := tracing.NewTracer(tracing.TracerConfig{
+		ServerAddress:  config.TracingServerAddr,
+		TracerIdentity: config.TracingIdentity,
+		Secret:         config.Secret,
 	})
-	
-	raft := raftkv.NewRaft() // Dummy name, depends on raft implementation
+
+	// Start Raft
+	var peers []*util.RPCEndPoint
+	persister := util.MakePersister()
+	applyCh := make(chan raftkv.ApplyMsg)
+	raft := raftkv.Start(peers, serverId, persister, applyCh)
+
+	// Start Server
 	server := raftkv.NewServer()
-	server.Start(raft /*  +Config Values */)
-	raft.Start(/* +Config Values */)
+	err = server.Start(serverId, config.ServerAddr, config.ServerListenAddr, config.ServerList, stracer, raft)
 }
