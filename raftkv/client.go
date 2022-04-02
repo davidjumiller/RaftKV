@@ -10,12 +10,6 @@ import (
 	"time"
 )
 
-// ClientEnd represents a client endpoint
-type ClientEnd struct {
-	Addr   string
-	Client *rpc.Client
-}
-
 type KvslibStart struct {
 	ClientId string
 }
@@ -331,10 +325,10 @@ func (d *KVS) addOutstandingPut(key string, putArgs *PutArgs) {
 }
 
 // Updates a KVS's estimated RTT based on an operation's RTT
-func (client *Client) updateInProgressAndRtt(opId uint32) {
-	client.KVS.Mutex.Lock()
-	newRtt := time.Now().Sub(client.KVS.InProgress[opId])
-	client.KVS.RTT = (client.KVS.RTT + newRtt) / 2
-	delete(client.KVS.InProgress, opId)
-	client.KVS.Mutex.Unlock()
+func (d *KVS) updateInProgressAndRtt(opId uint32) {
+	d.Mutex.Lock()
+	newRtt := time.Now().Sub(d.InProgress[opId])
+	d.RTT = (d.RTT + newRtt) / 2
+	delete(d.InProgress, opId)
+	d.Mutex.Unlock()
 }
