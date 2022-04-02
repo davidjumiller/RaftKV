@@ -58,7 +58,6 @@ type KVServer struct {
 	ServerAddr string
 	ServerList []string
 	Raft       *Raft             // this server's Raft instance
-	ApplyCh    chan ApplyMsg     // channel to receive updates from Raft
 	Store      map[string]string // in-memory key-value store
 	Tracer     *tracing.Tracer
 }
@@ -80,7 +79,6 @@ func (kvs *KVServer) Start(serverId int, serverAddr string, serverListenAddr str
 	kvs.ServerList = serverList
 	kvs.Tracer = tracer
 	kvs.Raft = raft
-	kvs.ApplyCh = raft.applyCh
 
 	// Begin Server trace
 	trace := tracer.CreateTrace()
@@ -88,7 +86,7 @@ func (kvs *KVServer) Start(serverId int, serverAddr string, serverListenAddr str
 
 	// Start listening for RPCs
 	rpcServer := &RemoteServer{kvs}
-	err := rpc.RegisterName("Server", rpcServer)
+	err := rpc.RegisterName("KVServer", rpcServer)
 	if err != nil {
 		fmt.Println("failed to register this server for RPCs")
 		return err
@@ -114,17 +112,20 @@ func (kvs *KVServer) Get(getArgs *GetArgs, getRes *GetRes) error {
 	raftState := kvs.Raft.GetState()
 
 	if raftState.IsLeader {
-		raftState, err := kvs.Raft.Execute(getArgs.Key) // Arguments to be specified later
+		// Log entry in Raft
+		_, err := kvs.Raft.Execute(getArgs.Key) // TODO: Arguments to be specified later
 		if err != nil {
 			return err
 		}
+		// Return value stored at key
 		getRes.Value = kvs.Store[getArgs.Key]
 	} else {
+		// Forward request to leader
 		conn, client, err := establishRPCConnection(kvs.ServerAddr, kvs.ServerList[raftState.LeaderId])
 		if err != nil {
 			return err
 		}
-		err = client.Call("KVServer.Get", getArgs, getRes) // Check if we can do it like this
+		err = client.Call("KVServer.Get", getArgs, getRes)
 		if err != nil {
 			return err
 		}
@@ -141,17 +142,20 @@ func (kvs *KVServer) Put(putArgs *PutArgs, putRes *PutRes) error {
 	raftState := kvs.Raft.GetState()
 
 	if raftState.IsLeader {
-		raftState, err := kvs.Raft.Execute(putArgs.Key) // Arguments to be specified later
+		// Log entry in Raft
+		_, err := kvs.Raft.Execute(putArgs.Key) // TODO: Arguments to be specified later
 		if err != nil {
 			return err
 		}
-		// Database updated from raft side via apply?
+		// Return response to notify successful Put
+		putRes.Value = putArgs.Value
 	} else {
+		// Forward request to leader
 		conn, client, err := establishRPCConnection(kvs.ServerAddr, kvs.ServerList[raftState.LeaderId])
 		if err != nil {
 			return err
 		}
-		err = client.Call("KVServer.Put", putArgs, putRes) // Check if we can do it like this, directly
+		err = client.Call("KVServer.Put", putArgs, putRes)
 		if err != nil {
 			return err
 		}
