@@ -32,7 +32,7 @@ func main() {
 	var peers []*util.RPCEndPoint
 	persister := util.MakePersister()
 	applyCh := make(chan raftkv.ApplyMsg)
-	raft := raftkv.Start(peers, serverId, persister, applyCh)
+	raft := raftkv.StartRaft(peers, serverId, persister, applyCh)
 
 	// Start Server
 	server := raftkv.NewServer()
