@@ -24,21 +24,6 @@ type Put struct {
 	Key      string
 	Value    string
 }
-type PutArgs struct {
-	ClientId string
-	Key      string
-	Value    string
-	OpId     uint8
-	PToken   tracing.TracingToken
-}
-
-type PutRes struct {
-	ClientId string
-	OpId     uint8
-	Key      string
-	Value    string
-	PToken   tracing.TracingToken
-}
 
 type PutResultRecvd struct {
 	ClientId string
@@ -53,7 +38,7 @@ type Get struct {
 }
 
 type BufferedGet struct {
-	Args    *GetArgs
+	Args    *util.GetArgs
 	PutOpId uint8
 }
 
@@ -62,21 +47,6 @@ type GetResultRecvd struct {
 	OpId     uint8
 	Key      string
 	Value    string
-}
-
-type GetArgs struct {
-	ClientId string
-	Key      string
-	OpId     uint8
-	GToken   tracing.TracingToken
-}
-
-type GetRes struct {
-	ClientId string
-	OpId     uint8
-	Key      string
-	Value    string // Note: this should be "" if a Put for this key does not exist
-	GToken   tracing.TracingToken
 }
 
 // NotifyChannel is used for notifying the client about a result for an operation.
@@ -161,7 +131,7 @@ func (d *KVS) Get(tracer *tracing.Tracer, key string) error {
 			// Outstanding put(s); buffer for later
 			getArgs := d.createGetArgs(tracer, key, localOpId)
 			elem := outstandingPuts.Back() // get latest put opId for this key
-			put := elem.Value.(PutArgs)
+			put := elem.Value.(util.PutArgs)
 			bufferedGet := BufferedGet{
 				Args:    getArgs,
 				PutOpId: put.OpId,
@@ -190,7 +160,7 @@ func (d *KVS) Put(tracer *tracing.Tracer, key string, value string) error {
 	trace.RecordAction(Put{d.ClientId, localOpId, key, value})
 
 	// Send put to head via RPC
-	putArgs := &PutArgs{
+	putArgs := &util.PutArgs{
 		ClientId: d.ClientId,
 		OpId:     localOpId,
 		Key:      key,
@@ -222,9 +192,9 @@ func (d *KVS) Stop() {
 }
 
 // Creates GetArgs struct for a new Get
-func (d *KVS) createGetArgs(tracer *tracing.Tracer, key string, localOpId uint8) *GetArgs {
+func (d *KVS) createGetArgs(tracer *tracing.Tracer, key string, localOpId uint8) *util.GetArgs {
 	trace := tracer.CreateTrace()
-	getArgs := &GetArgs{
+	getArgs := &util.GetArgs{
 		OpId:   localOpId,
 		Key:    key,
 		GToken: trace.GenerateToken(),
@@ -233,7 +203,7 @@ func (d *KVS) createGetArgs(tracer *tracing.Tracer, key string, localOpId uint8)
 }
 
 // Sends a Get request to a server and prepares to receive the result
-func (d *KVS) sendGet(getArgs *GetArgs) {
+func (d *KVS) sendGet(getArgs *util.GetArgs) {
 	// Send get to tail via RPC
 	trace := d.Tracer.ReceiveToken(getArgs.GToken)
 	trace.RecordAction(Get{d.ClientId, getArgs.OpId, getArgs.Key})
@@ -241,7 +211,7 @@ func (d *KVS) sendGet(getArgs *GetArgs) {
 	d.InProgress[getArgs.OpId] = time.Now()
 	d.Mutex.Unlock()
 	// M2: Refactor receiving into a new function
-	var getResult GetRes
+	var getResult util.GetRes
 	goCall := d.Client.Go("KVServer.Get", getArgs, &getResult, nil)
 	<-goCall.Done
 	resultStruct := ResultStruct{
@@ -275,12 +245,12 @@ func (d *KVS) sendBufferedGets(key string, opId uint8) {
 }
 
 // Sends a put to the server and waits for a result
-func (d *KVS) sendPut(localOpId uint8, putArgs *PutArgs) {
+func (d *KVS) sendPut(localOpId uint8, putArgs *util.PutArgs) {
 	d.Mutex.Lock()
 	d.InProgress[localOpId] = time.Now()
 	d.Mutex.Unlock()
 	// M2: Refactor receiving into separate function
-	var putResult PutRes
+	var putResult util.PutRes
 	goCall := d.Client.Go("KVServer.Put", putArgs, &putResult, nil)
 
 	<-goCall.Done
@@ -300,12 +270,12 @@ func (d *KVS) sendPut(localOpId uint8, putArgs *PutArgs) {
 }
 
 // Removes the put matching putArgs from outstanding puts
-func (d *KVS) removeOutstandingPut(putArgs *PutArgs) {
+func (d *KVS) removeOutstandingPut(putArgs *util.PutArgs) {
 	d.Mutex.Lock()
 	outstandingPuts := d.Puts[putArgs.Key]
 	for outstandingPuts.Len() > 0 {
 		elem := outstandingPuts.Front()
-		put := elem.Value.(PutArgs)
+		put := elem.Value.(util.PutArgs)
 		if put.OpId == putArgs.OpId {
 			outstandingPuts.Remove(elem)
 			d.sendBufferedGets(put.Key, put.OpId)
@@ -315,7 +285,7 @@ func (d *KVS) removeOutstandingPut(putArgs *PutArgs) {
 }
 
 // Adds a new outstanding put to a KVS
-func (d *KVS) addOutstandingPut(key string, putArgs *PutArgs) {
+func (d *KVS) addOutstandingPut(key string, putArgs *util.PutArgs) {
 	d.Mutex.Lock()
 	_, exists := d.Puts[key]
 	if !exists {

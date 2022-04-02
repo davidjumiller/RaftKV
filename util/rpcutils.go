@@ -1,10 +1,42 @@
 package util
 
 import (
+	"github.com/DistributedClocks/tracing"
 	"log"
 	"net"
 	"net/rpc"
 )
+
+type GetArgs struct {
+	ClientId string
+	Key      string
+	OpId     uint8
+	GToken   tracing.TracingToken
+}
+
+type GetRes struct {
+	ClientId string
+	OpId     uint8
+	Key      string
+	Value    string // Note: this should be "" if a Put for this key does not exist
+	GToken   tracing.TracingToken
+}
+
+type PutArgs struct {
+	ClientId string
+	Key      string
+	Value    string
+	OpId     uint8
+	PToken   tracing.TracingToken
+}
+
+type PutRes struct {
+	ClientId string
+	OpId     uint8
+	Key      string
+	Value    string
+	PToken   tracing.TracingToken
+}
 
 // MakeConnection Creates and returns a TCP connection between localAddr and remoteAddr
 func MakeConnection(localAddr string, remoteAddr string) *net.TCPConn {
