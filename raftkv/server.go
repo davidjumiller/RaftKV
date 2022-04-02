@@ -9,43 +9,43 @@ import (
 )
 
 type PutRecvd struct {
-	ClientId 	string
-	Key			string
-	Value		string
+	ClientId string
+	Key      string
+	Value    string
 }
 
 type PutFwd struct {
-	ClientId 	string
-	Key			string
-	Value		string
+	ClientId string
+	Key      string
+	Value    string
 }
 
 type PutFwdRecvd struct {
-	ClientId 	string
-	Key			string
-	Value		string
+	ClientId string
+	Key      string
+	Value    string
 }
 
 type PutResult struct {
-	ClientId 	string
-	Key			string
-	Value		string
+	ClientId string
+	Key      string
+	Value    string
 }
 
 type GetRecvd struct {
-	ClientId 	string
-	Key			string
+	ClientId string
+	Key      string
 }
 
 type GetFwd struct {
-	ClientId 	string
-	Key			string
+	ClientId string
+	Key      string
 }
 
 type GetResult struct {
-	ClientId 	string
-	Key			string
-	Value		string
+	ClientId string
+	Key      string
+	Value    string
 }
 
 type ServerStart struct {
@@ -57,16 +57,16 @@ type ServerListening struct {
 }
 
 type KVServerConfig struct {
-	ServerId			int      // this server's ID; used to index into ServersList
-  	ServerAddr			string   // address from which this server sends RPCs
-	ServerListenAddr	string   // address on which this server listens for RPCs
-	RaftListenAddr		string   // addresses of all possible servers in the system
-	ServerList			[]string // Currently, Index = ServerId
-	RaftList			[]string // Also Index = ServerId
-	NumServers			uint8
-	TracingServerAddr	string
-	TracingIdentity		string
-	Secret				[]byte
+	ServerId          int      // this server's ID; used to index into ServersList
+	ServerAddr        string   // address from which this server sends RPCs
+	ServerListenAddr  string   // address on which this server listens for RPCs
+	RaftListenAddr    string   // addresses of all possible servers in the system
+	ServerList        []string // Currently, Index = ServerId
+	RaftList          []string // Also Index = ServerId
+	NumServers        uint8
+	TracingServerAddr string
+	TracingIdentity   string
+	Secret            []byte
 }
 
 type KVServer struct {
@@ -129,8 +129,8 @@ func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 
 	trace := kvs.Tracer.ReceiveToken(getArgs.GToken)
 	trace.RecordAction(GetRecvd{
-		ClientId: "1" /*getArgs.ClientId*/,
-		Key: getArgs.Key,
+		ClientId: "1", /*getArgs.ClientId*/
+		Key:      getArgs.Key,
 	})
 
 	if kvs.ServerId == 1 /* raftState.IsLeader */ {
@@ -144,9 +144,9 @@ func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 		getRes.Value = val
 		getRes.GToken = getArgs.GToken
 		trace.RecordAction(GetResult{
-			ClientId: "1" /*getArgs.ClientId*/,
-			Key: getArgs.Key,
-			Value: kvs.Store[getArgs.Key],
+			ClientId: "1", /*getArgs.ClientId*/
+			Key:      getArgs.Key,
+			Value:    kvs.Store[getArgs.Key],
 		})
 	} else {
 		conn, client, err := establishRPCConnection(kvs.ServerAddr, kvs.ServerList[1 /* raftState.LeaderId */])
@@ -154,8 +154,8 @@ func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 			return err
 		}
 		trace.RecordAction(GetFwd{
-			ClientId: "1" /*getArgs.ClientId*/,
-			Key: getArgs.Key,
+			ClientId: "1", /*getArgs.ClientId*/
+			Key:      getArgs.Key,
 		})
 		err = client.Call("KVServer.Get", getArgs, getRes) // Check if we can do it like this
 		if err != nil {
@@ -176,12 +176,12 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 
 	trace := kvs.Tracer.ReceiveToken(putArgs.PToken)
 	trace.RecordAction(PutRecvd{
-		ClientId: "1" /*putArgs.ClientId*/,
-		Key: putArgs.Key,
-		Value: putArgs.Value,
+		ClientId: "1", /*putArgs.ClientId*/
+		Key:      putArgs.Key,
+		Value:    putArgs.Value,
 	})
 
-	if kvs.ServerId == 1 /* raftState.IsLeader */{
+	if kvs.ServerId == 1 /* raftState.IsLeader */ {
 		err := kvs.Raft.Execute(putArgs.Key) // Arguments to be specified later
 		if err != nil {
 			return err
@@ -192,9 +192,9 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 		putRes.Value = putArgs.Value
 		putRes.PToken = putArgs.PToken
 		trace.RecordAction(PutResult{
-			ClientId: "1" /*putArgs.ClientId*/,
-			Key: putArgs.Key,
-			Value: kvs.Store[putArgs.Key],
+			ClientId: "1", /*putArgs.ClientId*/
+			Key:      putArgs.Key,
+			Value:    kvs.Store[putArgs.Key],
 		})
 	} else {
 		conn, client, err := establishRPCConnection(kvs.ServerAddr, kvs.ServerList[0 /* raftState.LeaderId */])
@@ -202,9 +202,9 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 			return err
 		}
 		trace.RecordAction(PutFwd{
-			ClientId: "1" /*putArgs.ClientId*/,
-			Key: putArgs.Key,
-			Value: putArgs.Value,
+			ClientId: "1", /*putArgs.ClientId*/
+			Key:      putArgs.Key,
+			Value:    putArgs.Value,
 		})
 		err = client.Call("KVServer.Put", putArgs, putRes) // Check if we can do it like this, directly
 		if err != nil {

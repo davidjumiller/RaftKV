@@ -1,11 +1,11 @@
 package main
 
 import (
-	"os"
 	"cs.ubc.ca/cpsc416/p1/raftkv"
 	"cs.ubc.ca/cpsc416/p1/util"
 	"fmt"
 	"github.com/DistributedClocks/tracing"
+	"os"
 	"strconv"
 )
 
