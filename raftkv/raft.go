@@ -248,7 +248,7 @@ func (rf *Raft) Execute(command interface{}) (RaftState, error) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	rf.logs = append(rf.logs, LogEntry{command, rf.currentTerm, len(rf.logs) - 1})
+	rf.logs = append(rf.logs, LogEntry{command, rf.currentTerm, len(rf.logs)})
 
 	return rf.GetState(), nil
 }
