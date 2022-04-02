@@ -6,7 +6,6 @@ import (
 	"cs.ubc.ca/cpsc416/p1/util"
 	"fmt"
 	"github.com/DistributedClocks/tracing"
-	"os"
 	"strconv"
 )
 
@@ -16,7 +15,8 @@ func main() {
 	util.CheckErr(err, "failed to parse server ID")
 
 	// Read server config
-	filename := fmt.Sprintf("config/server_config_%s.json", serverId)
+	filename := fmt.Sprintf("./config/server_config_%v.json", serverId)
+	fmt.Print(filename)
 	var config raftkv.KVServerConfig
 	err = util.ReadJSONConfig(filename, &config)
 	util.CheckErr(err, "failed to locate or parse config for server %d", serverId)

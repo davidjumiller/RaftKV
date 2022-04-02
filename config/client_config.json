@@ -2,9 +2,9 @@
   "ClientID": "client1",
   "LocalServerIPPort": "0.0.0.0:1235",
   "ServerIPPortList": [
-    "0.0.0.0:1237",
-    "0.0.0.0:1238",
-    "0.0.0.0:1239"
+    "0.0.0.0:2345",
+    "0.0.0.0:2346",
+    "0.0.0.0:2347"
   ],
   "ChCapacity": 1,
   "TracingServerAddr": ":6666",
