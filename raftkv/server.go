@@ -127,9 +127,9 @@ func (rs *RemoteServer) Get(getArgs *GetArgs, getRes *GetRes) error {
 	kvs := rs.KVServer
 	// raftState := kvs.Raft.GetState()
 
-	trace := kvs.Tracer.ReceiveToken(getArgs.Token)
+	trace := kvs.Tracer.ReceiveToken(getArgs.GToken)
 	trace.RecordAction(GetRecvd{
-		ClientId: getArgs.ClientId,
+		ClientId: "1" /*getArgs.ClientId*/,
 		Key: getArgs.Key,
 	})
 
@@ -142,9 +142,9 @@ func (rs *RemoteServer) Get(getArgs *GetArgs, getRes *GetRes) error {
 		getRes.OpId = getArgs.OpId
 		getRes.Key = getArgs.Key
 		getRes.Value = val
-		getRes.GToken = getArgs.Token
+		getRes.GToken = getArgs.GToken
 		trace.RecordAction(GetResult{
-			ClientId: getArgs.ClientId,
+			ClientId: "1" /*getArgs.ClientId*/,
 			Key: getArgs.Key,
 			Value: kvs.Store[getArgs.Key],
 		})
@@ -154,7 +154,7 @@ func (rs *RemoteServer) Get(getArgs *GetArgs, getRes *GetRes) error {
 			return err
 		}
 		trace.RecordAction(GetFwd{
-			ClientId: getArgs.ClientId,
+			ClientId: "1" /*getArgs.ClientId*/,
 			Key: getArgs.Key,
 		})
 		err = client.Call("KVServer.Get", getArgs, getRes) // Check if we can do it like this
@@ -174,9 +174,9 @@ func (rs *RemoteServer) Put(putArgs *PutArgs, putRes *PutRes) error {
 	kvs := rs.KVServer
 	// raftState := kvs.Raft.GetState()
 
-	trace := kvs.Tracer.ReceiveToken(putArgs.Token)
+	trace := kvs.Tracer.ReceiveToken(putArgs.PToken)
 	trace.RecordAction(PutRecvd{
-		ClientId: putArgs.ClientId,
+		ClientId: "1" /*putArgs.ClientId*/,
 		Key: putArgs.Key,
 		Value: putArgs.Value,
 	})
@@ -190,9 +190,9 @@ func (rs *RemoteServer) Put(putArgs *PutArgs, putRes *PutRes) error {
 		putRes.OpId = putArgs.OpId
 		putRes.Key = putArgs.Key
 		putRes.Value = putArgs.Value
-		putRes.PToken = putArgs.Token
+		putRes.PToken = putArgs.PToken
 		trace.RecordAction(PutResult{
-			ClientId: putArgs.ClientId,
+			ClientId: "1" /*putArgs.ClientId*/,
 			Key: putArgs.Key,
 			Value: putArgs.Value,
 		})
@@ -202,7 +202,7 @@ func (rs *RemoteServer) Put(putArgs *PutArgs, putRes *PutRes) error {
 			return err
 		}
 		trace.RecordAction(PutFwd{
-			ClientId: putArgs.ClientId,
+			ClientId: "1" /*putArgs.ClientId*/,
 			Key: putArgs.Key,
 			Value: putArgs.Value,
 		})
