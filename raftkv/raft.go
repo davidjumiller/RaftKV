@@ -225,6 +225,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		go rf.apply()
 	}
 
+	rf.currLeaderIdx = args.LeaderId
+
 	return nil
 
 }
@@ -244,7 +246,12 @@ func (rf *Raft) GetState() RaftState {
 
 // Execute a command, called when the server gets a request
 func (rf *Raft) Execute(command interface{}) (RaftState, error) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 
+	rf.logs = append(rf.logs, LogEntry{command, rf.currentTerm, len(rf.logs) - 1})
+
+	return rf.GetState(), nil
 }
 
 //
