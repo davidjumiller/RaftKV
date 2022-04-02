@@ -55,6 +55,7 @@ type KVServer struct {
 	ServerAddr string
 	ServerList []string
 	Raft       *Raft             // this server's Raft instance
+	ApplyCh    chan ApplyMsg     // channel to receive updates from Raft
 	Store      map[string]string // in-memory key-value store
 	Tracer     *tracing.Tracer
 }
@@ -76,6 +77,7 @@ func (kvs *KVServer) Start(serverId int, serverAddr string, serverListenAddr str
 	kvs.ServerList = serverList
 	kvs.Tracer = tracer
 	kvs.Raft = raft
+	kvs.ApplyCh = raft.applyCh
 
 	// Begin Server trace
 	trace := tracer.CreateTrace()
