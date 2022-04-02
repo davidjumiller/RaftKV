@@ -1,0 +1,12 @@
+{
+    "ServerId": 1,
+    "ServerAddr": "0.0.0.0:4345",
+    "ServerListenAddr": "0.0.0.0:2345",
+    "RaftListenAddr": "0.0.0.0:3345",
+	"ServerList": ["0.0.0.0:2345", "0.0.0.0:2346", "0.0.0.0:2347"],
+	"RaftList": ["0.0.0.0:3345", "0.0.0.0:3346", "0.0.0.0:3347"],
+	"NumServers": 3,
+	"TracingServerAddr": "0.0.0.0:6666",
+	"TracingIdentity": "server1",
+	"Secret": ""
+}

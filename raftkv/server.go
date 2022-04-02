@@ -8,36 +8,52 @@ import (
 	"net/rpc"
 )
 
+type PutRecvd struct {
+	ClientId 	string
+	Key			string
+	Value		string
+}
+
+type PutFwd struct {
+	ClientId 	string
+	Key			string
+	Value		string
+}
+
+type PutFwdRecvd struct {
+	ClientId 	string
+	Key			string
+	Value		string
+}
+
+type PutResult struct {
+	ClientId 	string
+	Key			string
+	Value		string
+}
+
+type GetRecvd struct {
+	ClientId 	string
+	Key			string
+}
+
+type GetFwd struct {
+	ClientId 	string
+	Key			string
+}
+
+type GetResult struct {
+	ClientId 	string
+	Key			string
+	Value		string
+}
+
 type ServerStart struct {
 	ServerId int
 }
 
 type ServerListening struct {
 	ServerId int
-}
-
-type GetArgs struct {
-	Key    string
-	OpId   uint8
-	GToken tracing.TracingToken
-}
-
-type GetRes struct {
-	Value  string
-	GToken tracing.TracingToken
-}
-
-type PutArgs struct {
-	Key    string
-	Value  string
-	OpId   uint8
-	PToken tracing.TracingToken
-}
-
-type PutRes struct {
-	Key    string
-	Value  string
-	PToken tracing.TracingToken
 }
 
 type KVServerConfig struct {
@@ -107,25 +123,45 @@ func (kvs *KVServer) Start(serverId int, serverAddr string, serverListenAddr str
 	return nil
 }
 
-func (kvs *KVServer) Get(getArgs *GetArgs, getRes *GetRes) error {
+func (rs *RemoteServer) Get(getArgs *GetArgs, getRes *GetRes) error {
 
-	raftState := kvs.Raft.GetState()
+	kvs := rs.KVServer
+	// raftState := kvs.Raft.GetState()
 
-	if raftState.IsLeader {
-		// Log entry in Raft
-		_, err := kvs.Raft.Execute(getArgs.Key) // TODO: Arguments to be specified later
+	trace := kvs.Tracer.ReceiveToken(getArgs.GToken)
+	trace.RecordAction(GetRecvd{
+		ClientId: "1" /*getArgs.ClientId*/,
+		Key: getArgs.Key,
+	})
+
+	if kvs.ServerId == 1 /* raftState.IsLeader */ {
+    // Log entry in Raft
+		err := kvs.Raft.Execute(getArgs.Key) // TODO: Arguments to be specified later
 		if err != nil {
 			return err
 		}
-		// Return value stored at key
-		getRes.Value = kvs.Store[getArgs.Key]
+    // Return value stored at key
+		val := kvs.Store[getArgs.Key]
+		getRes.OpId = getArgs.OpId
+		getRes.Key = getArgs.Key
+		getRes.Value = val
+		getRes.GToken = getArgs.GToken
+		trace.RecordAction(GetResult{
+			ClientId: "1" /*getArgs.ClientId*/,
+			Key: getArgs.Key,
+			Value: kvs.Store[getArgs.Key],
+		})
 	} else {
-		// Forward request to leader
-		conn, client, err := establishRPCConnection(kvs.ServerAddr, kvs.ServerList[raftState.LeaderId])
+    // Forward request to leader
+		conn, client, err := establishRPCConnection(kvs.ServerAddr, kvs.ServerList[1 /* raftState.LeaderId */])
 		if err != nil {
 			return err
 		}
-		err = client.Call("KVServer.Get", getArgs, getRes)
+		trace.RecordAction(GetFwd{
+			ClientId: "1" /*getArgs.ClientId*/,
+			Key: getArgs.Key,
+		})
+		err = client.Call("KVServer.Get", getArgs, getRes) // Check if we can do it like this
 		if err != nil {
 			return err
 		}
@@ -133,29 +169,51 @@ func (kvs *KVServer) Get(getArgs *GetArgs, getRes *GetRes) error {
 		conn.Close()
 	}
 
-	// TODO: Tracing
+	// TODO: GetFwdRecvd Tracing
 	return nil
 }
 
-func (kvs *KVServer) Put(putArgs *PutArgs, putRes *PutRes) error {
+func (rs *RemoteServer) Put(putArgs *PutArgs, putRes *PutRes) error {
 
-	raftState := kvs.Raft.GetState()
+	kvs := rs.KVServer
+	// raftState := kvs.Raft.GetState()
 
-	if raftState.IsLeader {
-		// Log entry in Raft
-		_, err := kvs.Raft.Execute(putArgs.Key) // TODO: Arguments to be specified later
+	trace := kvs.Tracer.ReceiveToken(putArgs.PToken)
+	trace.RecordAction(PutRecvd{
+		ClientId: "1" /*putArgs.ClientId*/,
+		Key: putArgs.Key,
+		Value: putArgs.Value,
+	})
+
+	if kvs.ServerId == 1 /* raftState.IsLeader */{
+    // Log entry in Raft
+		err := kvs.Raft.Execute(putArgs.Key) // TODO: Arguments to be specified later
 		if err != nil {
 			return err
 		}
-		// Return response to notify successful Put
+    // Return response to notify successful Put
+		kvs.Store[putArgs.Key] = putArgs.Value // Database updated from raft side via apply in the future
+		putRes.OpId = putArgs.OpId
+		putRes.Key = putArgs.Key
 		putRes.Value = putArgs.Value
+		putRes.PToken = putArgs.PToken
+		trace.RecordAction(PutResult{
+			ClientId: "1" /*putArgs.ClientId*/,
+			Key: putArgs.Key,
+			Value: kvs.Store[putArgs.Key],
+		})
 	} else {
-		// Forward request to leader
-		conn, client, err := establishRPCConnection(kvs.ServerAddr, kvs.ServerList[raftState.LeaderId])
+    // Forward request to leader
+		conn, client, err := establishRPCConnection(kvs.ServerAddr, kvs.ServerList[0 /* raftState.LeaderId */])
 		if err != nil {
 			return err
 		}
-		err = client.Call("KVServer.Put", putArgs, putRes)
+		trace.RecordAction(PutFwd{
+			ClientId: "1" /*putArgs.ClientId*/,
+			Key: putArgs.Key,
+			Value: putArgs.Value,
+		})
+		err = client.Call("KVServer.Put", putArgs, putRes) // Check if we can do it like this, directly
 		if err != nil {
 			return err
 		}
@@ -163,7 +221,7 @@ func (kvs *KVServer) Put(putArgs *PutArgs, putRes *PutRes) error {
 		conn.Close()
 	}
 
-	// TODO: Tracing
+	// TODO: PutFwdRecvd Tracing
 	return nil
 }
 
