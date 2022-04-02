@@ -8,21 +8,25 @@ import (
 
 type GetArgs struct {
 	Key		string
+	OpId	uint8
 	GToken	tracing.TracingToken
 }
 
 type GetRes struct {
-	Res		string
+	Value	string
 	GToken	tracing.TracingToken
 }
 
 type PutArgs struct {
 	Key		string
 	Value 	string
+	OpId	uint8
 	PToken 	tracing.TracingToken
 }
 
 type PutRes struct {
+	Key		string
+	Value	string
 	PToken	tracing.TracingToken
 }
 
