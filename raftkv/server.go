@@ -3,26 +3,27 @@ package raftkv
 import (
 	"net"
 	"net/rpc"
+	"github.com/DistributedClocks/tracing"
 )
 
 type GetArgs struct {
-
+	Key		string
+	GToken	tracing.TracingToken
 }
 
 type GetRes struct {
-	res		string
+	Res		string
+	GToken	tracing.TracingToken
 }
 
 type PutArgs struct {
-
+	Key		string
+	Value 	string
+	PToken 	tracing.TracingToken
 }
 
 type PutRes struct {
-
-}
-
-type LogEntry struct {
-
+	PToken	tracing.TracingToken
 }
 
 type KVServerConfig struct {
@@ -30,11 +31,11 @@ type KVServerConfig struct {
 }
 
 type KVServer struct {
-	serverAddr	string
-	serverList	[]string
-	log 		[]LogEntry
-	numServers	uint8
-	raft		*raftkv.Raft
+	ServerAddr	string
+	ServerList	[]string
+	NumServers	uint8
+	Raft		*raftkv.Raft
+	Store 		map[string]string
 }
 
 func NewServer() *KVServer {
@@ -55,10 +56,16 @@ func (kvs *KVServer) NewServerJoin() error {
 
 func (kvs *KVServer) Get(getArgs *GetArgs, getRes *GetRes) error {
 
-	if kvs.raft.isLeader {
-		getRes.res = readDatabase(/* key */)
+	raftState := kvs.Raft.GetState()
+
+	if raftState.IsLeader {
+		raftState, err := kvs.Raft.Execute(getArgs.Key) // Arguments to be specified later
+		if err != nil {
+			return err
+		}
+		getRes.Res = kvs.Store[getArgs.Key]
 	} else {
-		conn, client, err := establishRPCConnection(kvs.serverAddr, kvs.raft.leaderServerAddr) // Depends on raft implementation, maybe call GetState?
+		conn, client, err := establishRPCConnection(kvs.ServerAddr, kvs.ServerList[raftState.LeaderId])
 		if err != nil {
 			return err
 		}
@@ -70,19 +77,22 @@ func (kvs *KVServer) Get(getArgs *GetArgs, getRes *GetRes) error {
 		conn.close()
 	}
 
+	// TODO: Tracing
 	return nil
 }
 
 func (kvs *KVServer) Put(putArgs *PutArgs, putRes *PutRes) error {
 
-	if kvs.raft.isLeader {
-		err := kvs.raft.updateLog(/* Log entry */) // Needs to be added to raft implementation
+	raftState := kvs.Raft.GetState()
+
+	if raftState.IsLeader {
+		raftState, err := kvs.Raft.Execute(putArgs.Key) // Arguments to be specified later
 		if err != nil {
 			return err
 		}
-		updateDatabase(/* KV entry */)
+		// Database updated from raft side via apply?
 	} else {
-		conn, client, err := establishRPCConnection(kvs.serverAddr, kvs.raft.leaderServerAddr) // Depends on raft implementation, maybe call GetState?
+		conn, client, err := establishRPCConnection(kvs.ServerAddr, kvs.ServerList[raftState.LeaderId])
 		if err != nil {
 			return err
 		}
@@ -94,15 +104,8 @@ func (kvs *KVServer) Put(putArgs *PutArgs, putRes *PutRes) error {
 		conn.close()
 	}
 
+	// TODO: Tracing
 	return nil
-}
-
-func updateDatabase(/* KV entry */) {
-	// Modify database value
-}
-
-func readDatabase(/* Key */) string {
-	// Either simply accessing in-memory storage in KVServer, or read from disk
 }
 
 func establishRPCConnection(laddr, raddr string) (*net.TCPConn, *rpc.Client, error) {
