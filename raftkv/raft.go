@@ -504,6 +504,12 @@ func randomTimeout(min, max int) int {
 	return rand.Intn(max-min) + min
 }
 
+func (rf *Raft) Kill() {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	rf.dead = true
+}
+
 // init and start a raft instance
 //
 // the service or tester wants to create a Raft server. the ports
@@ -518,7 +524,7 @@ func randomTimeout(min, max int) int {
 // hbCh is the channel for hb msg, the server should setup listener and push
 // hb into this channel
 //
-func Start(peers []*util.RPCEndPoint, selfidx int,
+func StartRaft(peers []*util.RPCEndPoint, selfidx int,
 	persister *util.Persister, applyCh chan ApplyMsg) *Raft {
 	rf := &Raft{}
 	rf.dead = false
