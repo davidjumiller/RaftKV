@@ -20,59 +20,54 @@ type KvslibStop struct {
 
 type Put struct {
 	ClientId string
-	OpId     uint32
+	OpId     uint8
 	Key      string
 	Value    string
 }
-
 type PutArgs struct {
-	ClientId     string
-	OpId         uint32
-	Key          string
-	Value        string
-	Token        tracing.TracingToken
-	ClientIPPort string
+	Key    string
+	Value  string
+	OpId   uint8
+	PToken tracing.TracingToken
 }
 
 type PutRes struct {
-	OpId   uint32
+	OpId   uint8
 	Key    string
 	Value  string
 	PToken tracing.TracingToken
 }
 
 type PutResultRecvd struct {
-	OpId uint32
+	OpId uint8
 	Key  string
 }
 
 type Get struct {
 	ClientId string
-	OpId     uint32
+	OpId     uint8
 	Key      string
 }
 
 type BufferedGet struct {
 	Args    *GetArgs
-	PutOpId uint32
+	PutOpId uint8
 }
 
 type GetResultRecvd struct {
-	OpId  uint32
+	OpId  uint8
 	Key   string
 	Value string
 }
 
 type GetArgs struct {
-	ClientId     string
-	OpId         uint32
-	Key          string
-	Token        tracing.TracingToken
-	ClientIPPort string
+	Key    string
+	OpId   uint8
+	GToken tracing.TracingToken
 }
 
 type GetRes struct {
-	OpId   uint32
+	OpId   uint8
 	Key    string
 	Value  string // Note: this should be "" if a Put for this key does not exist
 	GToken tracing.TracingToken
@@ -82,7 +77,7 @@ type GetRes struct {
 type NotifyChannel chan ResultStruct
 
 type ResultStruct struct {
-	OpId   uint32
+	OpId   uint8
 	Result string
 }
 
@@ -97,11 +92,11 @@ type KVS struct {
 	ServerListener  *net.TCPListener
 	RTT             time.Duration
 	Tracer          *tracing.Tracer
-	InProgress      map[uint32]time.Time // Map representing sent requests that haven't been responded to
+	InProgress      map[uint8]time.Time // Map representing sent requests that haven't been responded to
 	Mutex           *sync.RWMutex
 	Puts            map[string]*list.List // list of outstanding put ids for a key
 	BufferedGets    map[string]*list.List
-	OpId            uint32
+	OpId            uint8
 	AliveCh         chan int
 	Conn            *net.TCPConn
 	Client          *rpc.Client
@@ -110,7 +105,7 @@ type KVS struct {
 func NewKVS() *KVS {
 	return &KVS{
 		NotifyCh:     nil,
-		InProgress:   make(map[uint32]time.Time),
+		InProgress:   make(map[uint8]time.Time),
 		Mutex:        new(sync.RWMutex),
 		Puts:         make(map[string]*list.List),
 		BufferedGets: make(map[string]*list.List),
@@ -190,12 +185,10 @@ func (d *KVS) Put(tracer *tracing.Tracer, key string, value string) error {
 
 	// Send put to head via RPC
 	putArgs := &PutArgs{
-		ClientId:     d.ClientId,
-		OpId:         localOpId,
-		Key:          key,
-		Value:        value,
-		Token:        trace.GenerateToken(),
-		ClientIPPort: d.LocalServerAddr, // Receives result from tail
+		OpId:   localOpId,
+		Key:    key,
+		Value:  value,
+		PToken: trace.GenerateToken(),
 	}
 	d.addOutstandingPut(key, putArgs)
 	go d.sendPut(localOpId, putArgs)
@@ -222,13 +215,12 @@ func (d *KVS) Stop() {
 }
 
 // Creates GetArgs struct for a new Get
-func (d *KVS) createGetArgs(tracer *tracing.Tracer, key string, localOpId uint32) *GetArgs {
+func (d *KVS) createGetArgs(tracer *tracing.Tracer, key string, localOpId uint8) *GetArgs {
 	trace := tracer.CreateTrace()
 	getArgs := &GetArgs{
-		ClientId: d.ClientId,
-		OpId:     localOpId,
-		Key:      key,
-		Token:    trace.GenerateToken(),
+		OpId:   localOpId,
+		Key:    key,
+		GToken: trace.GenerateToken(),
 	}
 	return getArgs
 }
@@ -236,8 +228,8 @@ func (d *KVS) createGetArgs(tracer *tracing.Tracer, key string, localOpId uint32
 // Sends a Get request to a server and prepares to receive the result
 func (d *KVS) sendGet(getArgs *GetArgs) {
 	// Send get to tail via RPC
-	trace := d.Tracer.ReceiveToken(getArgs.Token)
-	trace.RecordAction(Get{getArgs.ClientId, getArgs.OpId, getArgs.Key})
+	trace := d.Tracer.ReceiveToken(getArgs.GToken)
+	trace.RecordAction(Get{d.ClientId, getArgs.OpId, getArgs.Key})
 	d.Mutex.Lock()
 	d.InProgress[getArgs.OpId] = time.Now()
 	d.Mutex.Unlock()
@@ -250,7 +242,7 @@ func (d *KVS) sendGet(getArgs *GetArgs) {
 		Result: getResult.Value,
 	}
 	d.NotifyCh <- resultStruct
-	trace = d.Tracer.ReceiveToken(getArgs.Token)
+	trace = d.Tracer.ReceiveToken(getArgs.GToken)
 	trace.RecordAction(GetResultRecvd{
 		OpId:  getResult.OpId,
 		Key:   getResult.Key,
@@ -260,7 +252,7 @@ func (d *KVS) sendGet(getArgs *GetArgs) {
 }
 
 // Sends the buffered Gets in a KVS associated with key
-func (d *KVS) sendBufferedGets(key string, opId uint32) {
+func (d *KVS) sendBufferedGets(key string, opId uint8) {
 	d.Mutex.Lock()
 	bufferedGets := d.BufferedGets[key]
 	for bufferedGets.Len() > 0 {
@@ -274,7 +266,7 @@ func (d *KVS) sendBufferedGets(key string, opId uint32) {
 	d.Mutex.Unlock()
 }
 
-func (d *KVS) sendPut(localOpId uint32, putArgs *PutArgs) {
+func (d *KVS) sendPut(localOpId uint8, putArgs *PutArgs) {
 	d.Mutex.Lock()
 	d.InProgress[localOpId] = time.Now()
 	d.Mutex.Unlock()
@@ -283,7 +275,7 @@ func (d *KVS) sendPut(localOpId uint32, putArgs *PutArgs) {
 	goCall := d.Client.Go("KVServer.Put", putArgs, &putResult, nil)
 
 	<-goCall.Done
-	trace := d.Tracer.ReceiveToken(putArgs.Token)
+	trace := d.Tracer.ReceiveToken(putArgs.PToken)
 	trace.RecordAction(PutResultRecvd{
 		OpId: putResult.OpId,
 		Key:  putResult.Key,
@@ -325,7 +317,7 @@ func (d *KVS) addOutstandingPut(key string, putArgs *PutArgs) {
 }
 
 // Updates a KVS's estimated RTT based on an operation's RTT
-func (d *KVS) updateInProgressAndRtt(opId uint32) {
+func (d *KVS) updateInProgressAndRtt(opId uint8) {
 	d.Mutex.Lock()
 	newRtt := time.Now().Sub(d.InProgress[opId])
 	d.RTT = (d.RTT + newRtt) / 2
