@@ -47,6 +47,11 @@ type PutRes struct {
 	PToken tracing.TracingToken
 }
 
+type PutResultRecvd struct {
+	OpId uint32
+	Key  string
+}
+
 type Get struct {
 	ClientId string
 	OpId     uint32
@@ -60,7 +65,6 @@ type BufferedGet struct {
 
 type GetResultRecvd struct {
 	OpId  uint32
-	GId   uint64
 	Key   string
 	Value string
 }
@@ -69,7 +73,7 @@ type GetArgs struct {
 	ClientId     string
 	OpId         uint32
 	Key          string
-	GToken       tracing.TracingToken
+	Token        tracing.TracingToken
 	ClientIPPort string
 }
 
@@ -91,43 +95,35 @@ type ResultStruct struct {
 type KVS struct {
 	NotifyCh NotifyChannel
 	// Add more KVS instance state here.
-	KTrace            *tracing.Trace
-	ClientId          string
-	LocalServerAddr   string
-	RemoteAddrIndex   int
-	ServerList        []string
-	ServerListener    *net.TCPListener
-	RTT               time.Duration
-	Tracer            *tracing.Tracer
-	InProgress        map[uint32]time.Time // Map representing sent requests that haven't been responded to
-	Mutex             *sync.RWMutex
-	Puts              map[string]uint32 // int representing number of puts on the key
-	LastPutOpId       uint32            // int representing last op id assigned to a put
-	LastPutResultOpId uint32            // int representing the op id of the last put result received
-	BufferedGets      map[string]*list.List
-	OpId              uint32
-	AliveCh           chan int
-	Conn              *net.TCPConn
-	Client            *rpc.Client
+	KTrace          *tracing.Trace
+	ClientId        string
+	LocalServerAddr string
+	RemoteAddrIndex int
+	ServerList      []string
+	ServerListener  *net.TCPListener
+	RTT             time.Duration
+	Tracer          *tracing.Tracer
+	InProgress      map[uint32]time.Time // Map representing sent requests that haven't been responded to
+	Mutex           *sync.RWMutex
+	Puts            map[string]*list.List // list of outstanding put ids for a key
+	BufferedGets    map[string]*list.List
+	OpId            uint32
+	AliveCh         chan int
+	Conn            *net.TCPConn
+	Client          *rpc.Client
 }
 
 func NewKVS() *KVS {
 	return &KVS{
-		NotifyCh:          nil,
-		InProgress:        make(map[uint32]time.Time),
-		Mutex:             new(sync.RWMutex),
-		Puts:              make(map[string]uint32),
-		LastPutOpId:       0,
-		LastPutResultOpId: 0,
-		BufferedGets:      make(map[string]*list.List),
-		OpId:              0,
-		RTT:               3 * time.Second,
-		AliveCh:           make(chan int),
+		NotifyCh:     nil,
+		InProgress:   make(map[uint32]time.Time),
+		Mutex:        new(sync.RWMutex),
+		Puts:         make(map[string]*list.List),
+		BufferedGets: make(map[string]*list.List),
+		OpId:         1,
+		RTT:          3 * time.Second,
+		AliveCh:      make(chan int),
 	}
-}
-
-type Client struct {
-	KVS *KVS
 }
 
 // Start Starts the instance of Client to use for connecting to the system.
@@ -160,26 +156,29 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, localServerIPP
 // The value OpId is used to identify this request and associate the returned value with this request.
 func (d *KVS) Get(tracer *tracing.Tracer, key string) error {
 	d.Mutex.RLock()
-	numOutstanding, exists := d.Puts[key]
-	d.Mutex.RUnlock()
+	outstandingPuts, exists := d.Puts[key]
 	localOpId := d.OpId
 	d.OpId++
+	d.Mutex.RUnlock()
 	if exists {
-		if numOutstanding > 0 {
+		d.Mutex.Lock()
+		if outstandingPuts.Len() > 0 {
 			// Outstanding put(s); buffer for later
 			getArgs := d.createGetArgs(tracer, key, localOpId)
+			elem := outstandingPuts.Back() // get latest put opId for this key
+			put := elem.Value.(PutArgs)
 			bufferedGet := BufferedGet{
 				Args:    getArgs,
-				PutOpId: d.LastPutOpId,
+				PutOpId: put.OpId,
 			}
 			d.BufferedGets[key].PushBack(bufferedGet)
-			return nil
 		}
+		d.Mutex.Unlock()
+	} else {
+		getArgs := d.createGetArgs(tracer, key, localOpId)
+		go d.sendGet(getArgs)
 	}
-	getArgs := d.createGetArgs(tracer, key, localOpId)
-	d.sendGet(getArgs) // TODO change to goroutine?
-	return nil         // TODO change return value?
-
+	return nil
 }
 
 // Put non-blocking request from the client to update the value associated with a key.
@@ -190,19 +189,7 @@ func (d *KVS) Get(tracer *tracing.Tracer, key string) error {
 func (d *KVS) Put(tracer *tracing.Tracer, key string, value string) error {
 	// Should return OpId or error
 	localOpId := d.OpId
-	d.LastPutOpId = localOpId
 	d.OpId++
-
-	// Update map to have an outstanding put
-	d.Mutex.Lock()
-	num, exists := d.Puts[key]
-	if exists {
-		d.Puts[key] = num + 1
-	} else {
-		d.Puts[key] = 1
-		d.BufferedGets[key] = list.New()
-	}
-	d.Mutex.Unlock()
 
 	trace := tracer.CreateTrace()
 	trace.RecordAction(Put{d.ClientId, localOpId, key, value})
@@ -216,14 +203,8 @@ func (d *KVS) Put(tracer *tracing.Tracer, key string, value string) error {
 		Token:        trace.GenerateToken(),
 		ClientIPPort: d.LocalServerAddr, // Receives result from tail
 	}
-	d.Mutex.Lock()
-	d.InProgress[localOpId] = time.Now()
-	d.Mutex.Unlock()
-	var putResult *PutRes
-	d.Client.Go("Server.Put", putArgs, putResult, nil)
-
-	// Result should be received from tail via KVS.PutResult()
-	//go d.handlePutTimeout(putArgs) // M2: handle Put timeout
+	d.addOutstandingPut(key, putArgs)
+	go d.sendPut(localOpId, putArgs)
 	return nil
 }
 
@@ -253,7 +234,7 @@ func (d *KVS) createGetArgs(tracer *tracing.Tracer, key string, localOpId uint32
 		ClientId: d.ClientId,
 		OpId:     localOpId,
 		Key:      key,
-		GToken:   trace.GenerateToken(),
+		Token:    trace.GenerateToken(),
 	}
 	return getArgs
 }
@@ -261,11 +242,12 @@ func (d *KVS) createGetArgs(tracer *tracing.Tracer, key string, localOpId uint32
 // Sends a Get request to a server and prepares to receive the result
 func (d *KVS) sendGet(getArgs *GetArgs) {
 	// Send get to tail via RPC
-	trace := d.Tracer.ReceiveToken(getArgs.GToken)
+	trace := d.Tracer.ReceiveToken(getArgs.Token)
 	trace.RecordAction(Get{getArgs.ClientId, getArgs.OpId, getArgs.Key})
 	d.Mutex.Lock()
 	d.InProgress[getArgs.OpId] = time.Now()
 	d.Mutex.Unlock()
+	// M2: Refactor receiving into a new function
 	var getResult GetRes
 	goCall := d.Client.Go("Server.Get", getArgs, &getResult, nil)
 	<-goCall.Done
@@ -274,21 +256,77 @@ func (d *KVS) sendGet(getArgs *GetArgs) {
 		Result: getResult.Value,
 	}
 	d.NotifyCh <- resultStruct
+	trace = d.Tracer.ReceiveToken(getArgs.Token)
+	trace.RecordAction(GetResultRecvd{
+		OpId:  getResult.OpId,
+		Key:   getResult.Key,
+		Value: getResult.Value,
+	})
 	//go handleGetTimeout(d, getArgs, conn, client) // M2: handle Get timout
 }
 
 // Sends the buffered Gets in a KVS associated with key
-func (d *KVS) sendBufferedGets(key string) {
+func (d *KVS) sendBufferedGets(key string, opId uint32) {
 	d.Mutex.Lock()
 	bufferedGets := d.BufferedGets[key]
 	for bufferedGets.Len() > 0 {
 		elem := bufferedGets.Front()
 		bufferedGet := elem.Value.(BufferedGet)
-		if bufferedGet.PutOpId <= d.LastPutResultOpId {
+		if bufferedGet.Args.Key == key && bufferedGet.PutOpId == opId {
 			bufferedGets.Remove(elem)
 			d.sendGet(bufferedGet.Args)
 		}
 	}
+	d.Mutex.Unlock()
+}
+
+func (d *KVS) sendPut(localOpId uint32, putArgs *PutArgs) {
+	d.Mutex.Lock()
+	d.InProgress[localOpId] = time.Now()
+	d.Mutex.Unlock()
+	// M2: Refactor receiving into separate function
+	var putResult PutRes
+	goCall := d.Client.Go("Server.Put", putArgs, &putResult, nil)
+
+	<-goCall.Done
+	trace := d.Tracer.ReceiveToken(putArgs.Token)
+	trace.RecordAction(PutResultRecvd{
+		OpId: putResult.OpId,
+		Key:  putResult.Key,
+	})
+	resultStruct := ResultStruct{
+		OpId:   putResult.OpId,
+		Result: putResult.Value,
+	}
+	d.NotifyCh <- resultStruct
+	d.removeOutstandingPut(putArgs)
+	//go d.handlePutTimeout(putArgs) // M2: handle Put timeout
+}
+
+// Removes the put matching putArgs from outstanding puts
+func (d *KVS) removeOutstandingPut(putArgs *PutArgs) {
+	d.Mutex.Lock()
+	outstandingPuts := d.Puts[putArgs.Key]
+	for outstandingPuts.Len() > 0 {
+		elem := outstandingPuts.Front()
+		put := elem.Value.(PutArgs)
+		if put.OpId == putArgs.OpId {
+			outstandingPuts.Remove(elem)
+			d.sendBufferedGets(put.Key, put.OpId)
+		}
+	}
+	d.Mutex.Unlock()
+}
+
+// Adds a new outstanding put to a KVS
+func (d *KVS) addOutstandingPut(key string, putArgs *PutArgs) {
+	d.Mutex.Lock()
+	_, exists := d.Puts[key]
+	if !exists {
+		d.Puts[key] = list.New()
+		d.BufferedGets[key] = list.New()
+	}
+	d.Puts[key].PushBack(putArgs)
 	d.Mutex.Unlock()
 }
 
