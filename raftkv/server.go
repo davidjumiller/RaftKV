@@ -41,13 +41,16 @@ type PutRes struct {
 }
 
 type KVServerConfig struct {
-	ServerId          int      // this server's ID; used to index into ServersList
-	ServerAddr        string   // address from which this server sends RPCs
-	ServerListenAddr  string   // address on which this server listens for RPCs
-	ServerList        []string // addresses of all possible servers in the system
-	TracingServerAddr string
-	Secret            []byte
-	TracingIdentity   string
+	ServerId			    int      // this server's ID; used to index into ServersList
+  ServerAddr        string   // address from which this server sends RPCs
+	ServerListenAddr	string   // address on which this server listens for RPCs
+	RaftListenAddr		string   // addresses of all possible servers in the system
+	ServerList			  []string // Currently, Index = ServerId
+	RaftList			    []string // Also Index = ServerId
+	NumServers			  uint8
+	TracingServerAddr	string
+	TracingIdentity		string
+	Secret				    []byte
 }
 
 type KVServer struct {

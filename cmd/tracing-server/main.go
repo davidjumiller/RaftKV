@@ -1,8 +1,10 @@
+// Code taken from a3
+
 package main
 
 import (
-	"github.com/DistributedClocks/tracing"
 	"log"
+	"github.com/DistributedClocks/tracing"
 )
 
 func main() {
