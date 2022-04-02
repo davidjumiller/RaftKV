@@ -41,16 +41,16 @@ type PutRes struct {
 }
 
 type KVServerConfig struct {
-	ServerId			    int      // this server's ID; used to index into ServersList
-  ServerAddr        string   // address from which this server sends RPCs
-	ServerListenAddr	string   // address on which this server listens for RPCs
-	RaftListenAddr		string   // addresses of all possible servers in the system
-	ServerList			  []string // Currently, Index = ServerId
-	RaftList			    []string // Also Index = ServerId
-	NumServers			  uint8
-	TracingServerAddr	string
-	TracingIdentity		string
-	Secret				    []byte
+	ServerId          int      // this server's ID; used to index into ServersList
+	ServerAddr        string   // address from which this server sends RPCs
+	ServerListenAddr  string   // address on which this server listens for RPCs
+	RaftListenAddr    string   // addresses of all possible servers in the system
+	ServerList        []string // Currently, Index = ServerId
+	RaftList          []string // Also Index = ServerId
+	NumServers        uint8
+	TracingServerAddr string
+	TracingIdentity   string
+	Secret            []byte
 }
 
 type KVServer struct {
@@ -99,6 +99,9 @@ func (kvs *KVServer) Start(serverId int, serverAddr string, serverListenAddr str
 		return err
 	}
 	trace.RecordAction(ServerListening{serverId})
+
+	// Maintain local store with updates from Raft
+	go kvs.updateStore()
 
 	for {
 		// Serve indefinitely
@@ -158,6 +161,18 @@ func (kvs *KVServer) Put(putArgs *PutArgs, putRes *PutRes) error {
 
 	// TODO: Tracing
 	return nil
+}
+
+// Update store with state changes notified by Raft via ApplyCh
+func (kvs *KVServer) updateStore() {
+	for {
+		applyMsg := <-kvs.Raft.applyCh
+		putArgs, ok := applyMsg.Command.(PutArgs)
+		if ok {
+			// Command is Put; update store
+			kvs.Store[putArgs.Key] = putArgs.Value
+		}
+	}
 }
 
 func establishRPCConnection(laddr, raddr string) (*net.TCPConn, *rpc.Client, error) {
