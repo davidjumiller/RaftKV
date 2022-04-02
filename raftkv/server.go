@@ -1,10 +1,20 @@
 package raftkv
 
 import (
+	"cs.ubc.ca/cpsc416/p1/util"
+	"fmt"
 	"github.com/DistributedClocks/tracing"
 	"net"
 	"net/rpc"
 )
+
+type ServerStart struct {
+	ServerId int
+}
+
+type ServerListening struct {
+	ServerId int
+}
 
 type GetArgs struct {
 	Key    string
@@ -31,28 +41,63 @@ type PutRes struct {
 }
 
 type KVServerConfig struct {
-	// Values Read from config file
+	ServerId          int      // this server's ID; used to index into ServersList
+	ServerAddr        string   // address from which this server sends RPCs
+	ServerListenAddr  string   // address on which this server listens for RPCs
+	ServerList        []string // addresses of all possible servers in the system
+	TracingServerAddr string
+	Secret            []byte
+	TracingIdentity   string
 }
 
 type KVServer struct {
+	ServerId   int
 	ServerAddr string
 	ServerList []string
-	NumServers uint8
-	Raft       *Raft
-	Store      map[string]string
+	Raft       *Raft             // this server's Raft instance
+	Store      map[string]string // in-memory key-value store
+	Tracer     *tracing.Tracer
 }
 
 func NewServer() *KVServer {
 	return &KVServer{
 		ServerList: []string{},
+		Store:      make(map[string]string),
 	}
 }
 
-func (kvs *KVServer) Start() error {
-	return nil
+type RemoteServer struct {
+	KVServer *KVServer
 }
 
-func (kvs *KVServer) NewServerJoin() error {
+func (kvs *KVServer) Start(serverId int, serverAddr string, serverListenAddr string, serverList []string, tracer *tracing.Tracer, raft *Raft) error {
+	kvs.ServerId = serverId
+	kvs.ServerAddr = serverAddr
+	kvs.ServerList = serverList
+	kvs.Tracer = tracer
+	kvs.Raft = raft
+
+	// Begin Server trace
+	trace := tracer.CreateTrace()
+	trace.RecordAction(ServerStart{serverId})
+
+	// Start listening for RPCs
+	rpcServer := &RemoteServer{kvs}
+	err := rpc.RegisterName("Server", rpcServer)
+	if err != nil {
+		fmt.Println("failed to register this server for RPCs")
+		return err
+	}
+	_, err = util.StartRPCListener(serverListenAddr)
+	if err != nil {
+		fmt.Println("failed to start listening for RPCs")
+		return err
+	}
+	trace.RecordAction(ServerListening{serverId})
+
+	for {
+		// Serve indefinitely
+	}
 	return nil
 }
 

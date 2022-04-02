@@ -2,6 +2,7 @@ package util
 
 import (
 	"log"
+	"net"
 	"net/rpc"
 )
 
@@ -36,4 +37,18 @@ func Connect(address string) (*rpc.Client, error) {
 	}
 
 	return client, nil
+}
+
+// StartRPCListener starts accepting RPCs at given rpcListenAddr
+func StartRPCListener(rpcListenAddr string) (*net.TCPListener, error) {
+	resolvedRPCListenAddr, err := net.ResolveTCPAddr("tcp", rpcListenAddr)
+	if err != nil {
+		return nil, err
+	}
+	listener, err := net.ListenTCP("tcp", resolvedRPCListenAddr)
+	if err != nil {
+		return nil, err
+	}
+	go rpc.Accept(listener)
+	return listener, nil
 }
