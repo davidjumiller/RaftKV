@@ -33,7 +33,6 @@ const (
 	FOLLOWER  IdentityType = 0
 	CANDIDATE              = 1
 	LEADER                 = 2
-	// CopyEntries = 3
 )
 
 type RaftState struct {
@@ -317,13 +316,63 @@ func (rf *Raft) sendRequestVote(serverIdx int, args *RequestVoteArgs, reply *Req
 
 }
 
+// broadcast appendEntries requests to all peers
+// must be called after lock is held
 func (rf *Raft) broadcastAppendEntries() {
+	if rf.identity != LEADER {
+		return
+	}
+	args := &AppendEntriesArgs{}
+	args.LeaderId = rf.selfidx
+	args.LeaderCommit = rf.commitIndex
+	args.Term = rf.currentTerm
 
+	reply := &AppendEntriesReply{}
+
+	for i := range rf.peers {
+		if i == rf.selfidx {
+			continue
+		}
+
+		args.PrevLogIndex = rf.nextIndex[i] - 1
+		args.PrevLogTerm = rf.logs[args.PrevLogIndex].Term
+
+		// send all entries after rf.nextIndex[i]
+		entries := rf.logs[rf.nextIndex[i]:]
+		args.Entries = make([]LogEntry, len(entries))
+		copy(args.Entries, entries)
+
+		go rf.sendAppendEntries(i, args, reply)
+	}
 }
 
-func (rf *Raft) sendAppendEntries(serverIdx int, args *AppendEntriesArgs, reply *AppendEntriesReply) error {
+func (rf *Raft) sendAppendEntries(serverIdx int, args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	err := rf.peers[serverIdx].Call("Raft.AppendEntries", args, reply)
-	return err
+	if err != nil {
+		log.Printf("error in rpc call server from %v to %v: %v \n", rf.selfidx, serverIdx, err)
+		return
+	}
+
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	if rf.identity != LEADER || args.Term != rf.currentTerm || reply.Term < rf.currentTerm {
+		return
+	}
+
+	if reply.Term > rf.currentTerm {
+		rf.setToFollower(args.Term)
+		return
+	}
+
+	// update matchIndex and nextIndex of followers
+	if reply.Success {
+		newMatchIdx := args.PrevLogIndex + len(args.Entries)
+		if newMatchIdx > rf.matchIndex[serverIdx] {
+			rf.matchIndex[serverIdx] = newMatchIdx
+		}
+
+		rf.nextIndex[serverIdx] = newMatchIdx + 1
+	}
 }
 
 func (rf *Raft) setToFollower(term int) {
@@ -343,6 +392,7 @@ func (rf *Raft) setToCandidate(identityType IdentityType) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
+	// avoid data racing
 	if rf.identity != identityType {
 		return
 	}
@@ -459,7 +509,6 @@ func (rf *Raft) runRaft() {
 			}
 		case CANDIDATE:
 			rf.mu.Unlock()
-			// TODO: candidate round
 			select {
 			case <-rf.stepDownCh:
 			// set to follower will push to stepdown channel
