@@ -2,8 +2,8 @@
   "ClientID": "client1",
   "LocalServerIPPort": "0.0.0.0:1235",
   "ServerIPPortList": [
-    "0.0.0.0:2345",
     "0.0.0.0:2346",
+    "0.0.0.0:2345",
     "0.0.0.0:2347"
   ],
   "ChCapacity": 1,

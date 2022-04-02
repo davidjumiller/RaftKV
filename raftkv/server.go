@@ -194,10 +194,10 @@ func (rs *RemoteServer) Put(putArgs *PutArgs, putRes *PutRes) error {
 		trace.RecordAction(PutResult{
 			ClientId: "1" /*putArgs.ClientId*/,
 			Key: putArgs.Key,
-			Value: putArgs.Value,
+			Value: kvs.Store[putArgs.Key],
 		})
 	} else {
-		conn, client, err := establishRPCConnection(kvs.ServerAddr, kvs.ServerList[1 /* raftState.LeaderId */])
+		conn, client, err := establishRPCConnection(kvs.ServerAddr, kvs.ServerList[0 /* raftState.LeaderId */])
 		if err != nil {
 			return err
 		}
