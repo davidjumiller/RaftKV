@@ -31,7 +31,15 @@ type PutRes struct {
 }
 
 type KVServerConfig struct {
-	// Values Read from config file
+	ServerId			uint8
+	ServerListenAddr	string
+	RaftListenAddr		string
+	ServerAddrs			[]string // Currently, Index = ServerId
+	RaftAddrs			[]string // Also Index = ServerId
+	NumServers			uint8
+	TracingServerAddr	string
+	TracingIdentity		string
+	Secret				[]byte
 }
 
 type KVServer struct {
