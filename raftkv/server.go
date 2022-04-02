@@ -192,7 +192,6 @@ func (rs *RemoteServer) Put(putArgs *PutArgs, putRes *PutRes) error {
 			return err
 		}
     // Return response to notify successful Put
-		kvs.Store[putArgs.Key] = putArgs.Value // Database updated from raft side via apply in the future
 		putRes.OpId = putArgs.OpId
 		putRes.Key = putArgs.Key
 		putRes.Value = putArgs.Value
