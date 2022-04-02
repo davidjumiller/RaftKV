@@ -251,7 +251,7 @@ func (d *KVS) sendGet(getArgs *GetArgs) {
 	//go handleGetTimeout(d, getArgs, conn, client) // M2: handle Get timout
 }
 
-// Sends the buffered Gets in a KVS associated with key
+// Sends the buffered Gets to the server matching the given key and opId
 func (d *KVS) sendBufferedGets(key string, opId uint8) {
 	d.Mutex.Lock()
 	bufferedGets := d.BufferedGets[key]
@@ -266,6 +266,7 @@ func (d *KVS) sendBufferedGets(key string, opId uint8) {
 	d.Mutex.Unlock()
 }
 
+// Sends a put to the server and waits for a result
 func (d *KVS) sendPut(localOpId uint8, putArgs *PutArgs) {
 	d.Mutex.Lock()
 	d.InProgress[localOpId] = time.Now()
