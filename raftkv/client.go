@@ -243,7 +243,7 @@ func (d *KVS) sendGet(getArgs *GetArgs) {
 	d.Mutex.Unlock()
 	// M2: Refactor receiving into a new function
 	var getResult GetRes
-	goCall := d.Client.Go("Server.Get", getArgs, &getResult, nil)
+	goCall := d.Client.Go("KVServer.Get", getArgs, &getResult, nil)
 	<-goCall.Done
 	resultStruct := ResultStruct{
 		OpId:   getArgs.OpId,
@@ -266,7 +266,7 @@ func (d *KVS) sendBufferedGets(key string, opId uint32) {
 	for bufferedGets.Len() > 0 {
 		elem := bufferedGets.Front()
 		bufferedGet := elem.Value.(BufferedGet)
-		if bufferedGet.Args.Key == key && bufferedGet.PutOpId == opId {
+		if bufferedGet.PutOpId == opId {
 			bufferedGets.Remove(elem)
 			d.sendGet(bufferedGet.Args)
 		}
@@ -280,7 +280,7 @@ func (d *KVS) sendPut(localOpId uint32, putArgs *PutArgs) {
 	d.Mutex.Unlock()
 	// M2: Refactor receiving into separate function
 	var putResult PutRes
-	goCall := d.Client.Go("Server.Put", putArgs, &putResult, nil)
+	goCall := d.Client.Go("KVServer.Put", putArgs, &putResult, nil)
 
 	<-goCall.Done
 	trace := d.Tracer.ReceiveToken(putArgs.Token)
