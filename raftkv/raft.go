@@ -372,6 +372,53 @@ func (rf *Raft) sendAppendEntries(serverIdx int, args *AppendEntriesArgs, reply 
 		}
 
 		rf.nextIndex[serverIdx] = newMatchIdx + 1
+	} else if reply.ConflictTerm < 0 {
+		// follower's log shorter than leader's log
+		rf.nextIndex[serverIdx] = reply.ConflictIndex
+		rf.matchIndex[serverIdx] = reply.ConflictIndex - 1
+	} else {
+		// find the conflict term in log
+		newNextIndex := len(rf.logs) - 1
+		for ; newNextIndex >= 0; newNextIndex-- {
+			if rf.logs[newNextIndex].Term == reply.ConflictTerm {
+				break
+			}
+		}
+
+		// if not found, set next index to conflict index
+		if newNextIndex < 0 {
+			rf.nextIndex[serverIdx] = reply.ConflictIndex
+		} else {
+			rf.nextIndex[serverIdx] = newNextIndex
+		}
+
+		rf.matchIndex[serverIdx] = newNextIndex - 1
+	}
+
+	rf.Commit()
+}
+
+// if there's an idx i where i >= rf.commitIndex and
+// for majority peers, the matchIdx of that peer >= i (it's sent to more than majority of peers)
+// update commitIdx to i and apply
+func (rf *Raft) Commit() {
+	for i := len(rf.logs) - 1; i >= rf.commitIndex; i-- {
+		sentCount := 1 // count itself
+
+		for j := range rf.peers {
+			if j == rf.selfidx {
+				continue
+			}
+			if rf.matchIndex[j] >= i {
+				sentCount++
+			}
+		}
+
+		if sentCount >= len(rf.peers)+1 {
+			rf.commitIndex = i
+			go rf.apply()
+			break // find the latest idx that hasn't committed but already sent to majority
+		}
 	}
 }
 
