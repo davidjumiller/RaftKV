@@ -244,13 +244,13 @@ func (rf *Raft) GetState() RaftState {
 }
 
 // Execute a command, called when the server gets a request
-func (rf *Raft) Execute(command interface{}) (RaftState, error) {
+func (rf *Raft) Execute(command interface{}) error {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
 	rf.logs = append(rf.logs, LogEntry{command, rf.currentTerm, len(rf.logs)})
 
-	return rf.GetState(), nil
+	return nil
 }
 
 //

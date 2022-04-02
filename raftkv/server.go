@@ -1,114 +1,220 @@
 package raftkv
 
 import (
+	"cs.ubc.ca/cpsc416/p1/util"
+	"fmt"
+	"github.com/DistributedClocks/tracing"
 	"net"
 	"net/rpc"
-	"github.com/DistributedClocks/tracing"
 )
 
-type GetArgs struct {
-	Key		string
-	OpId	uint8
-	GToken	tracing.TracingToken
+type PutRecvd struct {
+	ClientId 	string
+	Key			string
+	Value		string
 }
 
-type GetRes struct {
-	Value	string
-	GToken	tracing.TracingToken
+type PutFwd struct {
+	ClientId 	string
+	Key			string
+	Value		string
 }
 
-type PutArgs struct {
-	Key		string
-	Value 	string
-	OpId	uint8
-	PToken 	tracing.TracingToken
+type PutFwdRecvd struct {
+	ClientId 	string
+	Key			string
+	Value		string
 }
 
-type PutRes struct {
-	Key		string
-	Value	string
-	PToken	tracing.TracingToken
+type PutResult struct {
+	ClientId 	string
+	Key			string
+	Value		string
+}
+
+type GetRecvd struct {
+	ClientId 	string
+	Key			string
+}
+
+type GetFwd struct {
+	ClientId 	string
+	Key			string
+}
+
+type GetResult struct {
+	ClientId 	string
+	Key			string
+	Value		string
+}
+
+type ServerStart struct {
+	ServerId int
+}
+
+type ServerListening struct {
+	ServerId int
 }
 
 type KVServerConfig struct {
-	// Values Read from config file
+	ServerId			int      // this server's ID; used to index into ServersList
+  	ServerAddr			string   // address from which this server sends RPCs
+	ServerListenAddr	string   // address on which this server listens for RPCs
+	RaftListenAddr		string   // addresses of all possible servers in the system
+	ServerList			[]string // Currently, Index = ServerId
+	RaftList			[]string // Also Index = ServerId
+	NumServers			uint8
+	TracingServerAddr	string
+	TracingIdentity		string
+	Secret				[]byte
 }
 
 type KVServer struct {
-	ServerAddr	string
-	ServerList	[]string
-	NumServers	uint8
-	Raft		*raftkv.Raft
-	Store 		map[string]string
+	ServerId   int
+	ServerAddr string
+	ServerList []string
+	Raft       *Raft             // this server's Raft instance
+	ApplyCh    chan ApplyMsg     // channel to receive updates from Raft
+	Store      map[string]string // in-memory key-value store
+	Tracer     *tracing.Tracer
 }
 
 func NewServer() *KVServer {
 	return &KVServer{
-		isLeader: false,
-		serverList: []string{},
-		log: []LogEntry{},
+		ServerList: []string{},
+		Store:      make(map[string]string),
 	}
 }
 
-func (kvs *KVServer) Start() error {
+type RemoteServer struct {
+	KVServer *KVServer
+}
+
+func (kvs *KVServer) Start(serverId int, serverAddr string, serverListenAddr string, serverList []string, tracer *tracing.Tracer, raft *Raft) error {
+	kvs.ServerId = serverId
+	kvs.ServerAddr = serverAddr
+	kvs.ServerList = serverList
+	kvs.Tracer = tracer
+	kvs.Raft = raft
+	kvs.ApplyCh = raft.applyCh
+
+	// Begin Server trace
+	trace := tracer.CreateTrace()
+	trace.RecordAction(ServerStart{serverId})
+
+	// Start listening for RPCs
+	rpcServer := &RemoteServer{kvs}
+	err := rpc.RegisterName("KVServer", rpcServer)
+	if err != nil {
+		fmt.Println("failed to register this server for RPCs")
+		return err
+	}
+	_, err = util.StartRPCListener(serverListenAddr)
+	if err != nil {
+		fmt.Println("failed to start listening for RPCs")
+		return err
+	}
+	trace.RecordAction(ServerListening{serverId})
+
+	for {
+		// Serve indefinitely
+	}
 	return nil
 }
 
-func (kvs *KVServer) NewServerJoin() error {
-	return nil
-}
+func (rs *RemoteServer) Get(getArgs *GetArgs, getRes *GetRes) error {
 
-func (kvs *KVServer) Get(getArgs *GetArgs, getRes *GetRes) error {
+	kvs := rs.KVServer
+	// raftState := kvs.Raft.GetState()
 
-	raftState := kvs.Raft.GetState()
+	trace := kvs.Tracer.ReceiveToken(getArgs.GToken)
+	trace.RecordAction(GetRecvd{
+		ClientId: "1" /*getArgs.ClientId*/,
+		Key: getArgs.Key,
+	})
 
-	if raftState.IsLeader {
-		raftState, err := kvs.Raft.Execute(getArgs.Key) // Arguments to be specified later
+	if kvs.ServerId == 1 /* raftState.IsLeader */ {
+		err := kvs.Raft.Execute(getArgs.Key) // Arguments to be specified later
 		if err != nil {
 			return err
 		}
-		getRes.Res = kvs.Store[getArgs.Key]
+		val := kvs.Store[getArgs.Key]
+		getRes.OpId = getArgs.OpId
+		getRes.Key = getArgs.Key
+		getRes.Value = val
+		getRes.GToken = getArgs.GToken
+		trace.RecordAction(GetResult{
+			ClientId: "1" /*getArgs.ClientId*/,
+			Key: getArgs.Key,
+			Value: kvs.Store[getArgs.Key],
+		})
 	} else {
-		conn, client, err := establishRPCConnection(kvs.ServerAddr, kvs.ServerList[raftState.LeaderId])
+		conn, client, err := establishRPCConnection(kvs.ServerAddr, kvs.ServerList[1 /* raftState.LeaderId */])
 		if err != nil {
 			return err
 		}
+		trace.RecordAction(GetFwd{
+			ClientId: "1" /*getArgs.ClientId*/,
+			Key: getArgs.Key,
+		})
 		err = client.Call("KVServer.Get", getArgs, getRes) // Check if we can do it like this
 		if err != nil {
 			return err
 		}
-		client.close()
-		conn.close()
+		client.Close()
+		conn.Close()
 	}
 
-	// TODO: Tracing
+	// TODO: GetFwdRecvd Tracing
 	return nil
 }
 
-func (kvs *KVServer) Put(putArgs *PutArgs, putRes *PutRes) error {
+func (rs *RemoteServer) Put(putArgs *PutArgs, putRes *PutRes) error {
 
-	raftState := kvs.Raft.GetState()
+	kvs := rs.KVServer
+	// raftState := kvs.Raft.GetState()
 
-	if raftState.IsLeader {
-		raftState, err := kvs.Raft.Execute(putArgs.Key) // Arguments to be specified later
+	trace := kvs.Tracer.ReceiveToken(putArgs.PToken)
+	trace.RecordAction(PutRecvd{
+		ClientId: "1" /*putArgs.ClientId*/,
+		Key: putArgs.Key,
+		Value: putArgs.Value,
+	})
+
+	if kvs.ServerId == 1 /* raftState.IsLeader */{
+		err := kvs.Raft.Execute(putArgs.Key) // Arguments to be specified later
 		if err != nil {
 			return err
 		}
-		// Database updated from raft side via apply?
+		kvs.Store[putArgs.Key] = putArgs.Value // Database updated from raft side via apply in the future
+		putRes.OpId = putArgs.OpId
+		putRes.Key = putArgs.Key
+		putRes.Value = putArgs.Value
+		putRes.PToken = putArgs.PToken
+		trace.RecordAction(PutResult{
+			ClientId: "1" /*putArgs.ClientId*/,
+			Key: putArgs.Key,
+			Value: kvs.Store[putArgs.Key],
+		})
 	} else {
-		conn, client, err := establishRPCConnection(kvs.ServerAddr, kvs.ServerList[raftState.LeaderId])
+		conn, client, err := establishRPCConnection(kvs.ServerAddr, kvs.ServerList[0 /* raftState.LeaderId */])
 		if err != nil {
 			return err
 		}
+		trace.RecordAction(PutFwd{
+			ClientId: "1" /*putArgs.ClientId*/,
+			Key: putArgs.Key,
+			Value: putArgs.Value,
+		})
 		err = client.Call("KVServer.Put", putArgs, putRes) // Check if we can do it like this, directly
 		if err != nil {
 			return err
 		}
-		client.close()
-		conn.close()
+		client.Close()
+		conn.Close()
 	}
 
-	// TODO: Tracing
+	// TODO: PutFwdRecvd Tracing
 	return nil
 }
 

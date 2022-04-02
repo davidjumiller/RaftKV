@@ -1,12 +1,14 @@
+// Code taken from a3
+
 package main
 
 import (
-	"github.com/DistributedClocks/tracing"
 	"log"
+	"github.com/DistributedClocks/tracing"
 )
 
 func main() {
-	tracingServer := tracing.NewTracingServerFromFile("config/tracing_server_config.json")
+	tracingServer := tracing.NewTracingServerFromFile("./config/tracing_server_config.json")
 
 	err := tracingServer.Open()
 	if err != nil {
