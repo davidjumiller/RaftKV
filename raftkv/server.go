@@ -122,7 +122,7 @@ func (kvs *KVServer) Start(serverId int, serverAddr string, serverListenAddr str
 	return nil
 }
 
-func (rs *RemoteServer) Get(getArgs *GetArgs, getRes *GetRes) error {
+func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 
 	kvs := rs.KVServer
 	// raftState := kvs.Raft.GetState()
@@ -169,7 +169,7 @@ func (rs *RemoteServer) Get(getArgs *GetArgs, getRes *GetRes) error {
 	return nil
 }
 
-func (rs *RemoteServer) Put(putArgs *PutArgs, putRes *PutRes) error {
+func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 
 	kvs := rs.KVServer
 	// raftState := kvs.Raft.GetState()
