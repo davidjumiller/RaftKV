@@ -131,7 +131,7 @@ func (d *KVS) Get(tracer *tracing.Tracer, key string) error {
 			// Outstanding put(s); buffer for later
 			getArgs := d.createGetArgs(tracer, key, localOpId)
 			elem := outstandingPuts.Back() // get latest put opId for this key
-			put := elem.Value.(util.PutArgs)
+			put := elem.Value.(*util.PutArgs)
 			bufferedGet := BufferedGet{
 				Args:    getArgs,
 				PutOpId: put.OpId,
@@ -275,7 +275,7 @@ func (d *KVS) removeOutstandingPut(putArgs *util.PutArgs) {
 	outstandingPuts := d.Puts[putArgs.Key]
 	for outstandingPuts.Len() > 0 {
 		elem := outstandingPuts.Front()
-		put := elem.Value.(util.PutArgs)
+		put := elem.Value.(*util.PutArgs)
 		if put.OpId == putArgs.OpId {
 			outstandingPuts.Remove(elem)
 			d.sendBufferedGets(put.Key, put.OpId)
