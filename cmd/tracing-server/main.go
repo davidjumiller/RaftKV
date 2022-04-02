@@ -3,8 +3,8 @@
 package main
 
 import (
-	"log"
 	"github.com/DistributedClocks/tracing"
+	"log"
 )
 
 func main() {
