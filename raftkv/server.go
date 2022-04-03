@@ -129,7 +129,7 @@ func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 
 	trace := kvs.Tracer.ReceiveToken(getArgs.GToken)
 	trace.RecordAction(GetRecvd{
-		ClientId: "1", /*getArgs.ClientId*/
+		ClientId: getArgs.ClientId,
 		Key:      getArgs.Key,
 	})
 
@@ -139,12 +139,13 @@ func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 			return err
 		}
 		val := kvs.Store[getArgs.Key]
+		getRes.ClientId = getArgs.ClientId
 		getRes.OpId = getArgs.OpId
 		getRes.Key = getArgs.Key
 		getRes.Value = val
 		getRes.GToken = getArgs.GToken
 		trace.RecordAction(GetResult{
-			ClientId: "1", /*getArgs.ClientId*/
+			ClientId: getArgs.ClientId,
 			Key:      getArgs.Key,
 			Value:    kvs.Store[getArgs.Key],
 		})
@@ -154,7 +155,7 @@ func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 			return err
 		}
 		trace.RecordAction(GetFwd{
-			ClientId: "1", /*getArgs.ClientId*/
+			ClientId: getArgs.ClientId,
 			Key:      getArgs.Key,
 		})
 		err = client.Call("KVServer.Get", getArgs, getRes) // Check if we can do it like this
@@ -176,7 +177,7 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 
 	trace := kvs.Tracer.ReceiveToken(putArgs.PToken)
 	trace.RecordAction(PutRecvd{
-		ClientId: "1", /*putArgs.ClientId*/
+		ClientId: putArgs.ClientId,
 		Key:      putArgs.Key,
 		Value:    putArgs.Value,
 	})
@@ -187,12 +188,13 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 			return err
 		}
 		kvs.Store[putArgs.Key] = putArgs.Value // Database updated from raft side via apply in the future
+		putRes.ClientId = putArgs.ClientId
 		putRes.OpId = putArgs.OpId
 		putRes.Key = putArgs.Key
 		putRes.Value = putArgs.Value
 		putRes.PToken = putArgs.PToken
 		trace.RecordAction(PutResult{
-			ClientId: "1", /*putArgs.ClientId*/
+			ClientId: putArgs.ClientId,
 			Key:      putArgs.Key,
 			Value:    kvs.Store[putArgs.Key],
 		})
@@ -202,7 +204,7 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 			return err
 		}
 		trace.RecordAction(PutFwd{
-			ClientId: "1", /*putArgs.ClientId*/
+			ClientId: putArgs.ClientId,
 			Key:      putArgs.Key,
 			Value:    putArgs.Value,
 		})
