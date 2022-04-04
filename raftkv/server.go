@@ -150,15 +150,12 @@ func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 			Value:    kvs.Store[getArgs.Key],
 		})
 	} else {
-		conn, client, err := establishRPCConnection(kvs.ServerAddr, kvs.ServerList[1 /* raftState.LeaderId */])
-		if err != nil {
-			return err
-		}
+		conn, client := util.MakeClient("", kvs.ServerList[0 /* raftState.LeaderId */])
 		trace.RecordAction(GetFwd{
 			ClientId: getArgs.ClientId,
 			Key:      getArgs.Key,
 		})
-		err = client.Call("KVServer.Get", getArgs, getRes) // Check if we can do it like this
+		err := client.Call("KVServer.Get", getArgs, getRes) // Check if we can do it like this
 		if err != nil {
 			return err
 		}
@@ -199,16 +196,13 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 			Value:    kvs.Store[putArgs.Key],
 		})
 	} else {
-		conn, client, err := establishRPCConnection(kvs.ServerAddr, kvs.ServerList[0 /* raftState.LeaderId */])
-		if err != nil {
-			return err
-		}
+		conn, client := util.MakeClient("", kvs.ServerList[0 /* raftState.LeaderId */])
 		trace.RecordAction(PutFwd{
 			ClientId: putArgs.ClientId,
 			Key:      putArgs.Key,
 			Value:    putArgs.Value,
 		})
-		err = client.Call("KVServer.Put", putArgs, putRes) // Check if we can do it like this, directly
+		err := client.Call("KVServer.Put", putArgs, putRes) // Check if we can do it like this, directly
 		if err != nil {
 			return err
 		}

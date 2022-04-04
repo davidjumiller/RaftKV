@@ -41,6 +41,7 @@ func main() {
 	util.CheckErr(err, "Error getting value %v, opId: %v\b", err)
 
 	// Sequence of interleaved gets and puts
+	/*
 	err = client.Put(tracer, "key1", "test1")
 	util.CheckErr(err, "Error putting value %v, opId: %v\b", err)
 	err = client.Get(tracer, "key1")
@@ -55,10 +56,14 @@ func main() {
 	util.CheckErr(err, "Error putting value %v, opId: %v\b", err)
 	err = client.Get(tracer, "key1")
 	util.CheckErr(err, "Error getting value %v, opId: %v\b", err)
+	*/
 
 	for i := 0; i < 2; i++ {
 		result := <-notifCh
 		log.Println(result)
 	}
-	client.Stop()
+	for {
+		// Infinite loop, allows us to wait for go routines to finish
+		// TODO: replace this with sync.waitgroup? then call client.Stop()
+	}
 }
