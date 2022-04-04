@@ -223,14 +223,6 @@ func (d *KVS) sendGet(getArgs *util.GetArgs) {
 	if err != nil {
 		return
 	}
-	resultStruct := ResultStruct{
-		OpId:   getResult.OpId,
-		Type:   "Get",
-		Key:    getResult.Key,
-		Result: getResult.Value,
-	}
-	send := func() { d.NotifyCh <- resultStruct }
-	go send()
 	trace = d.Tracer.ReceiveToken(getResult.GToken)
 	trace.RecordAction(GetResultRecvd{
 		ClientId: getResult.ClientId,
@@ -238,6 +230,15 @@ func (d *KVS) sendGet(getArgs *util.GetArgs) {
 		Key:      getResult.Key,
 		Value:    getResult.Value,
 	})
+	resultStruct := ResultStruct{
+		OpId:   getResult.OpId,
+		Type:   "Get",
+		Key:    getResult.Key,
+		Result: getResult.Value,
+	}
+
+	send := func() { d.NotifyCh <- resultStruct }
+	go send()
 	//go handleGetTimeout(d, getArgs, conn, client) // M2: handle Get timout
 }
 
