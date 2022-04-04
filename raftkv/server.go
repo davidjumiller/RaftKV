@@ -138,22 +138,23 @@ func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 			return err
 		}
 		val := kvs.Store[getArgs.Key]
-		getRes.ClientId = getArgs.ClientId
-		getRes.OpId = getArgs.OpId
-		getRes.Key = getArgs.Key
-		getRes.Value = val
-		getRes.GToken = getArgs.GToken
 		trace.RecordAction(GetResult{
 			ClientId: getArgs.ClientId,
 			Key:      getArgs.Key,
 			Value:    kvs.Store[getArgs.Key],
 		})
+		getRes.ClientId = getArgs.ClientId
+		getRes.OpId = getArgs.OpId
+		getRes.Key = getArgs.Key
+		getRes.Value = val
+		getRes.GToken = trace.GenerateToken()
 	} else {
 		conn, client := util.MakeClient("", kvs.ServerList[0 /* raftState.LeaderId */])
 		trace.RecordAction(GetFwd{
 			ClientId: getArgs.ClientId,
 			Key:      getArgs.Key,
 		})
+		getArgs.GToken = trace.GenerateToken()
 		err := client.Call("KVServer.Get", getArgs, getRes)
 		if err != nil {
 			return err
@@ -183,16 +184,16 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 			return err
 		}
 		kvs.Store[putArgs.Key] = putArgs.Value // Database updated from raft side via apply in the future
-		putRes.ClientId = putArgs.ClientId
-		putRes.OpId = putArgs.OpId
-		putRes.Key = putArgs.Key
-		putRes.Value = putArgs.Value
-		putRes.PToken = putArgs.PToken
 		trace.RecordAction(PutResult{
 			ClientId: putArgs.ClientId,
 			Key:      putArgs.Key,
 			Value:    kvs.Store[putArgs.Key],
 		})
+		putRes.ClientId = putArgs.ClientId
+		putRes.OpId = putArgs.OpId
+		putRes.Key = putArgs.Key
+		putRes.Value = putArgs.Value
+		putRes.PToken = trace.GenerateToken()
 	} else {
 		conn, client := util.MakeClient("", kvs.ServerList[0 /* raftState.LeaderId */])
 		trace.RecordAction(PutFwd{
@@ -200,6 +201,7 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 			Key:      putArgs.Key,
 			Value:    putArgs.Value,
 		})
+		putArgs.PToken = trace.GenerateToken()
 		err := client.Call("KVServer.Put", putArgs, putRes)
 		if err != nil {
 			return err

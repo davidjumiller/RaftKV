@@ -201,9 +201,9 @@ func (d *KVS) createGetArgs(tracer *tracing.Tracer, key string, localOpId uint8)
 	trace := tracer.CreateTrace()
 	getArgs := &util.GetArgs{
 		ClientId: d.ClientId,
-		OpId:   localOpId,
-		Key:    key,
-		GToken: trace.GenerateToken(),
+		OpId:     localOpId,
+		Key:      key,
+		GToken:   trace.GenerateToken(),
 	}
 	return getArgs
 }
@@ -212,8 +212,11 @@ func (d *KVS) createGetArgs(tracer *tracing.Tracer, key string, localOpId uint8)
 func (d *KVS) sendGet(getArgs *util.GetArgs) {
 	// Send get to tail via RPC
 	d.InProgress[getArgs.OpId] = time.Now()
+
 	trace := d.Tracer.ReceiveToken(getArgs.GToken)
 	trace.RecordAction(Get{getArgs.ClientId, getArgs.OpId, getArgs.Key})
+	getArgs.GToken = trace.GenerateToken()
+
 	// M2: Refactor receiving into a new function
 	var getResult util.GetRes
 	err := d.Client.Call("KVServer.Get", getArgs, &getResult)
@@ -222,11 +225,11 @@ func (d *KVS) sendGet(getArgs *util.GetArgs) {
 	}
 	resultStruct := ResultStruct{
 		OpId:   getResult.OpId,
-		Type:	"Get",
-		Key:	getResult.Key,
+		Type:   "Get",
+		Key:    getResult.Key,
 		Result: getResult.Value,
 	}
-	send := func (){ d.NotifyCh <- resultStruct }
+	send := func() { d.NotifyCh <- resultStruct }
 	go send()
 	trace = d.Tracer.ReceiveToken(getResult.GToken)
 	trace.RecordAction(GetResultRecvd{
@@ -268,16 +271,16 @@ func (d *KVS) sendPut(localOpId uint8, putArgs *util.PutArgs) {
 		ClientId: putResult.ClientId,
 		OpId:     putResult.OpId,
 		Key:      putResult.Key,
-		Value:	  putResult.Value,
+		Value:    putResult.Value,
 	})
 	resultStruct := ResultStruct{
 		OpId:   putResult.OpId,
-		Type:	"Put",
-		Key:	putResult.Key,
+		Type:   "Put",
+		Key:    putResult.Key,
 		Result: putResult.Value,
 	}
 
-	send := func (){ d.NotifyCh <- resultStruct }
+	send := func() { d.NotifyCh <- resultStruct }
 	go send()
 	d.removeOutstandingPut(putArgs)
 	d.Mutex.Unlock()
