@@ -4,7 +4,6 @@ import (
 	"cs.ubc.ca/cpsc416/p1/util"
 	"fmt"
 	"github.com/DistributedClocks/tracing"
-	"net"
 	"net/rpc"
 )
 
@@ -155,7 +154,7 @@ func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 			ClientId: getArgs.ClientId,
 			Key:      getArgs.Key,
 		})
-		err := client.Call("KVServer.Get", getArgs, getRes) // Check if we can do it like this
+		err := client.Call("KVServer.Get", getArgs, getRes)
 		if err != nil {
 			return err
 		}
@@ -163,7 +162,6 @@ func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 		conn.Close()
 	}
 
-	// TODO: GetFwdRecvd Tracing
 	return nil
 }
 
@@ -202,7 +200,7 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 			Key:      putArgs.Key,
 			Value:    putArgs.Value,
 		})
-		err := client.Call("KVServer.Put", putArgs, putRes) // Check if we can do it like this, directly
+		err := client.Call("KVServer.Put", putArgs, putRes)
 		if err != nil {
 			return err
 		}
@@ -210,24 +208,5 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 		conn.Close()
 	}
 
-	// TODO: PutFwdRecvd Tracing
 	return nil
-}
-
-func establishRPCConnection(laddr, raddr string) (*net.TCPConn, *rpc.Client, error) {
-	// Code adapted from Piazza post @471_f1, and our a3 code
-	resolvedLaddr, err := net.ResolveTCPAddr("tcp", laddr)
-	if err != nil {
-		return nil, nil, err
-	}
-	resolvedRaddr, err := net.ResolveTCPAddr("tcp", raddr)
-	if err != nil {
-		return nil, nil, err
-	}
-	conn, err := net.DialTCP("tcp", resolvedLaddr, resolvedRaddr)
-	if err != nil {
-		return nil, nil, err
-	}
-	client := rpc.NewClient(conn)
-	return conn, client, nil
 }

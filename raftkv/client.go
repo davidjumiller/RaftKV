@@ -241,11 +241,15 @@ func (d *KVS) sendBufferedGets(key string, opId uint8) {
 	for bufferedGets.Len() > 0 {
 		d.Mutex.Lock()
 		elem := bufferedGets.Front()
-		bufferedGet := elem.Value.(BufferedGet)
-		if bufferedGet.PutOpId == opId {
-			bufferedGets.Remove(elem)
-			d.Mutex.Unlock()
-			d.sendGet(bufferedGet.Args)
+		if elem != nil {
+			bufferedGet := elem.Value.(BufferedGet)
+			if bufferedGet.PutOpId == opId {
+				bufferedGets.Remove(elem)
+				d.Mutex.Unlock()
+				d.sendGet(bufferedGet.Args)
+			} else {
+				d.Mutex.Unlock()
+			}
 		}
 	}
 }
@@ -289,6 +293,8 @@ func (d *KVS) removeOutstandingPut(putArgs *util.PutArgs) {
 			outstandingPuts.Remove(elem)
 			d.Mutex.Unlock()
 			d.sendBufferedGets(put.Key, put.OpId)
+		} else {
+			d.Mutex.Unlock()
 		}
 	}
 }
