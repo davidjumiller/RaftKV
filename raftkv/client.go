@@ -144,8 +144,6 @@ func (d *KVS) Get(tracer *tracing.Tracer, key string) error {
 		d.Mutex.Unlock()
 	} else {
 		getArgs := d.createGetArgs(tracer, key, localOpId)
-		trace := d.Tracer.ReceiveToken(getArgs.GToken)
-		trace.RecordAction(Get{getArgs.ClientId, getArgs.OpId, getArgs.Key})
 		go d.sendGet(getArgs)
 	}
 	return nil
@@ -214,6 +212,8 @@ func (d *KVS) sendGet(getArgs *util.GetArgs) {
 	d.Mutex.Lock()
 	d.InProgress[getArgs.OpId] = time.Now()
 	d.Mutex.Unlock()
+	trace := d.Tracer.ReceiveToken(getArgs.GToken)
+	trace.RecordAction(Get{getArgs.ClientId, getArgs.OpId, getArgs.Key})
 	// M2: Refactor receiving into a new function
 	var getResult util.GetRes
 	goCall := d.Client.Go("KVServer.Get", getArgs, &getResult, nil)
@@ -225,7 +225,7 @@ func (d *KVS) sendGet(getArgs *util.GetArgs) {
 		Result: getResult.Value,
 	}
 	d.NotifyCh <- resultStruct
-	trace := d.Tracer.ReceiveToken(getResult.GToken)
+	trace = d.Tracer.ReceiveToken(getResult.GToken)
 	trace.RecordAction(GetResultRecvd{
 		ClientId: getResult.ClientId,
 		OpId:     getResult.OpId,
