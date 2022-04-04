@@ -1,0 +1,9 @@
+# Trace output
+shiviz_output.log
+trace_output.log
+
+# Executables
+bin/
+
+# IDE
+.idea/
