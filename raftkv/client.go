@@ -8,7 +8,6 @@ import (
 	"net/rpc"
 	"sync"
 	"time"
-	"fmt"
 )
 
 type KvslibStart struct {
@@ -268,18 +267,14 @@ func (d *KVS) sendPut(localOpId uint8, putArgs *util.PutArgs) {
 		Key:      putResult.Key,
 		Value:	  putResult.Value,
 	})
-	fmt.Print("Test1\n")
 	resultStruct := ResultStruct{
 		OpId:   putResult.OpId,
 		Type:	"Put",
 		Key:	putResult.Key,
 		Result: putResult.Value,
 	}
-	fmt.Print("Test2\n")
 	d.NotifyCh <- resultStruct
-	fmt.Print("Test3\n")
 	d.removeOutstandingPut(putArgs)
-	fmt.Print("Test4\n")
 	//go d.handlePutTimeout(putArgs) // M2: handle Put timeout
 }
 
