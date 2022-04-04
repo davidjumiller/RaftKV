@@ -144,7 +144,9 @@ func (d *KVS) Get(tracer *tracing.Tracer, key string) error {
 		d.Mutex.Unlock()
 	} else {
 		getArgs := d.createGetArgs(tracer, key, localOpId)
-		go d.sendGet(getArgs)
+		d.Mutex.Lock()
+		d.sendGet(getArgs)
+		d.Mutex.Unlock()
 	}
 	return nil
 }
@@ -209,22 +211,23 @@ func (d *KVS) createGetArgs(tracer *tracing.Tracer, key string, localOpId uint8)
 // Sends a Get request to a server and prepares to receive the result
 func (d *KVS) sendGet(getArgs *util.GetArgs) {
 	// Send get to tail via RPC
-	d.Mutex.Lock()
 	d.InProgress[getArgs.OpId] = time.Now()
-	d.Mutex.Unlock()
 	trace := d.Tracer.ReceiveToken(getArgs.GToken)
 	trace.RecordAction(Get{getArgs.ClientId, getArgs.OpId, getArgs.Key})
 	// M2: Refactor receiving into a new function
 	var getResult util.GetRes
-	goCall := d.Client.Go("KVServer.Get", getArgs, &getResult, nil)
-	<-goCall.Done
+	err := d.Client.Call("KVServer.Get", getArgs, &getResult)
+	if err != nil {
+		return
+	}
 	resultStruct := ResultStruct{
 		OpId:   getResult.OpId,
 		Type:	"Get",
 		Key:	getResult.Key,
 		Result: getResult.Value,
 	}
-	d.NotifyCh <- resultStruct
+	send := func (){ d.NotifyCh <- resultStruct }
+	go send()
 	trace = d.Tracer.ReceiveToken(getResult.GToken)
 	trace.RecordAction(GetResultRecvd{
 		ClientId: getResult.ClientId,
@@ -238,17 +241,13 @@ func (d *KVS) sendGet(getArgs *util.GetArgs) {
 // Sends the buffered Gets to the server matching the given key and opId
 func (d *KVS) sendBufferedGets(key string, opId uint8) {
 	bufferedGets := d.BufferedGets[key]
-	for bufferedGets.Len() > 0 {
-		d.Mutex.Lock()
+	for i := bufferedGets.Len(); i > 0; i-- {
 		elem := bufferedGets.Front()
 		if elem != nil {
 			bufferedGet := elem.Value.(BufferedGet)
 			if bufferedGet.PutOpId == opId {
 				bufferedGets.Remove(elem)
-				d.Mutex.Unlock()
 				d.sendGet(bufferedGet.Args)
-			} else {
-				d.Mutex.Unlock()
 			}
 		}
 	}
@@ -258,12 +257,12 @@ func (d *KVS) sendBufferedGets(key string, opId uint8) {
 func (d *KVS) sendPut(localOpId uint8, putArgs *util.PutArgs) {
 	d.Mutex.Lock()
 	d.InProgress[localOpId] = time.Now()
-	d.Mutex.Unlock()
 	// M2: Refactor receiving into separate function
 	var putResult util.PutRes
-	goCall := d.Client.Go("KVServer.Put", putArgs, &putResult, nil)
-
-	<-goCall.Done
+	err := d.Client.Call("KVServer.Put", putArgs, &putResult)
+	if err != nil {
+		return
+	}
 	trace := d.Tracer.ReceiveToken(putResult.PToken)
 	trace.RecordAction(PutResultRecvd{
 		ClientId: putResult.ClientId,
@@ -277,24 +276,23 @@ func (d *KVS) sendPut(localOpId uint8, putArgs *util.PutArgs) {
 		Key:	putResult.Key,
 		Result: putResult.Value,
 	}
-	d.NotifyCh <- resultStruct
+
+	send := func (){ d.NotifyCh <- resultStruct }
+	go send()
 	d.removeOutstandingPut(putArgs)
+	d.Mutex.Unlock()
 	//go d.handlePutTimeout(putArgs) // M2: handle Put timeout
 }
 
 // Removes the put matching putArgs from outstanding puts
 func (d *KVS) removeOutstandingPut(putArgs *util.PutArgs) {
 	outstandingPuts := d.Puts[putArgs.Key]
-	for outstandingPuts.Len() > 0 {
-		d.Mutex.Lock()
+	for i := outstandingPuts.Len(); i > 0; i-- {
 		elem := outstandingPuts.Front()
 		put := elem.Value.(*util.PutArgs)
 		if put.OpId == putArgs.OpId {
 			outstandingPuts.Remove(elem)
-			d.Mutex.Unlock()
 			d.sendBufferedGets(put.Key, put.OpId)
-		} else {
-			d.Mutex.Unlock()
 		}
 	}
 }
