@@ -257,6 +257,7 @@ func (d *KVS) sendBufferedGets(key string, putOpId uint8) {
 
 // Sends a put to the server and waits for a result
 func (d *KVS) sendPut(localOpId uint8, putArgs *util.PutArgs) {
+	d.lockLog("send put", d.PutMutex)
 	d.lockLog("rtt", d.RTTMutex)
 	d.InProgress[localOpId] = time.Now()
 	d.unlockLog("rtt", d.RTTMutex)
@@ -281,6 +282,7 @@ func (d *KVS) sendPut(localOpId uint8, putArgs *util.PutArgs) {
 	}
 	go d.sendResult(resultStruct)
 	d.removeOutstandingPut(putArgs)
+	d.unlockLog("send put", d.PutMutex)
 	//go d.handlePutTimeout(putArgs) // M2: handle Put timeout
 }
 
@@ -293,9 +295,7 @@ func (d *KVS) removeOutstandingPut(putArgs *util.PutArgs) {
 		if put.OpId == putArgs.OpId {
 			outstandingPut := elem
 			elem = elem.Next()
-			d.lockLog("remove outstanding put", d.PutMutex)
 			outstandingPuts.Remove(outstandingPut)
-			d.unlockLog("remove outstanding put", d.PutMutex)
 			d.sendBufferedGets(put.Key, put.OpId)
 		} else {
 			elem = elem.Next()
