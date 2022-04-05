@@ -3,7 +3,6 @@ package raftkv
 import (
 	"container/list"
 	"cs.ubc.ca/cpsc416/p1/util"
-	"fmt"
 	"github.com/DistributedClocks/tracing"
 	"net"
 	"net/rpc"
@@ -338,12 +337,12 @@ func (d *KVS) sendResult(result *ResultStruct) {
 
 func (d *KVS) lockLog(lockname string, lock *sync.Mutex) {
 	lock.Lock()
-	fmt.Println(lockname, "lock acquired") // for debugging purposes
+	//fmt.Println(lockname, "lock acquired") // for debugging purposes
 }
 
 func (d *KVS) unlockLog(lockname string, lock *sync.Mutex) {
 	lock.Unlock()
-	fmt.Println(lockname, "lock released") // for debugging purposes
+	//fmt.Println(lockname, "lock released") // for debugging purposes
 }
 
 func (d *KVS) nextOpId() uint8 {
