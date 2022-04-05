@@ -68,7 +68,6 @@ type KVS struct {
 	LocalServerAddr string
 	RemoteAddrIndex int
 	ServerList      []string
-	ServerListener  *net.TCPListener
 	RTT             time.Duration
 	Tracer          *tracing.Tracer
 	InProgress      map[uint8]time.Time // Map representing sent requests that haven't been responded to
@@ -186,8 +185,6 @@ func (d *KVS) Stop() {
 	util.CheckErr(err, "Could not close KVS RPC client")
 	err = d.Conn.Close()
 	util.CheckErr(err, "Could not close KVS server connection")
-	err = d.ServerListener.Close()
-	util.CheckErr(err, "Could not close KVS RPC listener")
 	close(d.NotifyCh)
 	d.AliveCh <- 1
 	close(d.AliveCh)
