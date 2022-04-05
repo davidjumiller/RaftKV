@@ -1,8 +1,8 @@
 {
     "ServerId": 2,
-    "ServerAddr": "0.0.0.0:43460",
-    "ServerListenAddr": "0.0.0.0:23460",
-    "RaftListenAddr": "0.0.0.0:33460",
+    "ServerAddr": "0.0.0.0:43470",
+    "ServerListenAddr": "0.0.0.0:23470",
+    "RaftListenAddr": "0.0.0.0:33470",
 	"ServerList": ["0.0.0.0:23450", "0.0.0.0:23460", "0.0.0.0:23470"],
 	"RaftList": ["0.0.0.0:33450", "0.0.0.0:33460", "0.0.0.0:33470"],
 	"NumServers": 3,

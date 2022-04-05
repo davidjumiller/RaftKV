@@ -125,6 +125,7 @@ func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 
 	kvs := rs.KVServer
 	// raftState := kvs.Raft.GetState()
+	leaderId := 1 // leaderId := raftState.LeaderID
 
 	trace := kvs.Tracer.ReceiveToken(getArgs.GToken)
 	trace.RecordAction(GetRecvd{
@@ -132,7 +133,7 @@ func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 		Key:      getArgs.Key,
 	})
 
-	if kvs.ServerId == 1 /* raftState.IsLeader */ {
+	if kvs.ServerId == leaderId {
 		err := kvs.Raft.Execute(getArgs.Key) // Arguments to be specified later
 		if err != nil {
 			return err
@@ -149,7 +150,7 @@ func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 		getRes.Value = val
 		getRes.GToken = trace.GenerateToken()
 	} else {
-		conn, client := util.MakeClient("", kvs.ServerList[0 /* raftState.LeaderId */])
+		conn, client := util.MakeClient("", kvs.ServerList[leaderId])
 		trace.RecordAction(GetFwd{
 			ClientId: getArgs.ClientId,
 			Key:      getArgs.Key,
@@ -170,6 +171,7 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 
 	kvs := rs.KVServer
 	// raftState := kvs.Raft.GetState()
+	leaderId := 1 // leaderId := raftState.LeaderID
 
 	trace := kvs.Tracer.ReceiveToken(putArgs.PToken)
 	trace.RecordAction(PutRecvd{
@@ -178,7 +180,7 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 		Value:    putArgs.Value,
 	})
 
-	if kvs.ServerId == 1 /* raftState.IsLeader */ {
+	if kvs.ServerId == leaderId {
 		err := kvs.Raft.Execute(putArgs.Key) // Arguments to be specified later
 		if err != nil {
 			return err
@@ -195,7 +197,7 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 		putRes.Value = putArgs.Value
 		putRes.PToken = trace.GenerateToken()
 	} else {
-		conn, client := util.MakeClient("", kvs.ServerList[0 /* raftState.LeaderId */])
+		conn, client := util.MakeClient("", kvs.ServerList[leaderId])
 		trace.RecordAction(PutFwd{
 			ClientId: putArgs.ClientId,
 			Key:      putArgs.Key,
