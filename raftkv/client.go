@@ -3,6 +3,7 @@ package raftkv
 import (
 	"container/list"
 	"cs.ubc.ca/cpsc416/p1/util"
+	"fmt"
 	"github.com/DistributedClocks/tracing"
 	"net"
 	"net/rpc"
@@ -182,13 +183,16 @@ func (d *KVS) Stop() {
 	err := d.Tracer.Close()
 	util.CheckErr(err, "Could not close KVS tracer")
 	err = d.Client.Close()
-	util.CheckErr(err, "Could not close KVS RPC client")
-	err = d.Conn.Close()
-	util.CheckErr(err, "Could not close KVS server connection")
-	close(d.NotifyCh)
-	d.AliveCh <- 1
-	close(d.AliveCh)
+	util.CheckErr(err, "Could not close KVS client")
+	go d.closeRoutines()
 	return
+}
+
+func (d *KVS) closeRoutines() {
+	if len(d.AliveCh) > 0 {
+		d.AliveCh <- 1
+	}
+	close(d.AliveCh)
 }
 
 // Creates GetArgs struct for a new Get
@@ -334,12 +338,12 @@ func (d *KVS) sendResult(result *ResultStruct) {
 
 func (d *KVS) lockLog(lockname string, lock *sync.Mutex) {
 	lock.Lock()
-	//fmt.Println(lockname, "lock acquired") // for debugging purposes
+	fmt.Println(lockname, "lock acquired") // for debugging purposes
 }
 
 func (d *KVS) unlockLog(lockname string, lock *sync.Mutex) {
 	lock.Unlock()
-	//fmt.Println(lockname, "lock released") // for debugging purposes
+	fmt.Println(lockname, "lock released") // for debugging purposes
 }
 
 func (d *KVS) nextOpId() uint8 {
