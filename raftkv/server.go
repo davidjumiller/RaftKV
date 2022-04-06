@@ -225,6 +225,8 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 }
 
 func (kvs *KVServer) checkLeader(raftState RaftState) error {
+	/* Locking to prevent the case where util.TryMakeClient() is called more than once simultaneously, 
+	leading to only one get/put succeeding and the rest dropping their requests */
 	kvs.Mutex.Lock()
 
 	if kvs.LastLdrID != raftState.LeaderID {
