@@ -48,28 +48,33 @@ type GetResult struct {
 }
 
 type ServerStart struct {
-	ServerId int
+	ServerIdx int
 }
 
 type ServerListening struct {
-	ServerId int
+	ServerIdx int
 }
 
 type KVServerConfig struct {
-	ServerId          int      // this server's ID; used to index into ServersList
-	ServerAddr        string   // address from which this server sends RPCs
-	ServerListenAddr  string   // address on which this server listens for RPCs
-	RaftListenAddr    string   // addresses of all possible servers in the system
-	ServerList        []string // Currently, Index = ServerId
-	RaftList          []string // Also Index = ServerId
-	NumServers        uint8
+	ServerIdx  int    // this server's index into ServerList and RaftList
+	ServerAddr string // address from which this server sends RPCs
+
+	// addresses on which of each server in the system listens for RPCs,
+	// where this server's address is at index ServerIdx, i.e. ServerList[ServerIdx]
+	ServerList []string
+
+	// addresses on which each server's Raft instance listens for RPCs,
+	// where this server's Raft instance is at index ServerIdx, i.e. RaftList[ServerIdx]
+	RaftList []string
+
+	// tracing config
 	TracingServerAddr string
 	TracingIdentity   string
 	Secret            []byte
 }
 
 type KVServer struct {
-	ServerId   int
+	ServerIdx  int
 	ServerAddr string
 	ServerList []string
 	Raft       *Raft             // this server's Raft instance
@@ -89,8 +94,8 @@ type RemoteServer struct {
 	KVServer *KVServer
 }
 
-func (kvs *KVServer) Start(serverId int, serverAddr string, serverListenAddr string, serverList []string, tracer *tracing.Tracer, raft *Raft) error {
-	kvs.ServerId = serverId
+func (kvs *KVServer) Start(serverIdx int, serverAddr string, serverList []string, tracer *tracing.Tracer, raft *Raft) error {
+	kvs.ServerIdx = serverIdx
 	kvs.ServerAddr = serverAddr
 	kvs.ServerList = serverList
 	kvs.Tracer = tracer
@@ -99,7 +104,7 @@ func (kvs *KVServer) Start(serverId int, serverAddr string, serverListenAddr str
 
 	// Begin Server trace
 	trace := tracer.CreateTrace()
-	trace.RecordAction(ServerStart{serverId})
+	trace.RecordAction(ServerStart{serverIdx})
 
 	// Start listening for RPCs
 	rpcServer := &RemoteServer{kvs}
@@ -108,12 +113,12 @@ func (kvs *KVServer) Start(serverId int, serverAddr string, serverListenAddr str
 		fmt.Println("failed to register this server for RPCs")
 		return err
 	}
-	_, err = util.StartRPCListener(serverListenAddr)
+	_, err = util.StartRPCListener(serverList[serverIdx])
 	if err != nil {
 		fmt.Println("failed to start listening for RPCs")
 		return err
 	}
-	trace.RecordAction(ServerListening{serverId})
+	trace.RecordAction(ServerListening{serverIdx})
 
 	for {
 		// Serve indefinitely
@@ -125,7 +130,7 @@ func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 
 	kvs := rs.KVServer
 	// raftState := kvs.Raft.GetState()
-	leaderId := 1 // leaderId := raftState.LeaderID
+	leaderIdx := 0 // leaderIdx := raftState.LeaderID
 
 	trace := kvs.Tracer.ReceiveToken(getArgs.GToken)
 	trace.RecordAction(GetRecvd{
@@ -133,7 +138,7 @@ func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 		Key:      getArgs.Key,
 	})
 
-	if kvs.ServerId == leaderId {
+	if kvs.ServerIdx == leaderIdx {
 		err := kvs.Raft.Execute(getArgs.Key) // Arguments to be specified later
 		if err != nil {
 			return err
@@ -150,7 +155,7 @@ func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 		getRes.Value = val
 		getRes.GToken = trace.GenerateToken()
 	} else {
-		conn, client := util.MakeClient("", kvs.ServerList[leaderId])
+		conn, client := util.MakeClient("", kvs.ServerList[leaderIdx])
 		trace.RecordAction(GetFwd{
 			ClientId: getArgs.ClientId,
 			Key:      getArgs.Key,
@@ -171,7 +176,7 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 
 	kvs := rs.KVServer
 	// raftState := kvs.Raft.GetState()
-	leaderId := 1 // leaderId := raftState.LeaderID
+	leaderIdx := 0 // leaderIdx := raftState.LeaderID
 
 	trace := kvs.Tracer.ReceiveToken(putArgs.PToken)
 	trace.RecordAction(PutRecvd{
@@ -180,7 +185,7 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 		Value:    putArgs.Value,
 	})
 
-	if kvs.ServerId == leaderId {
+	if kvs.ServerIdx == leaderIdx {
 		err := kvs.Raft.Execute(putArgs.Key) // Arguments to be specified later
 		if err != nil {
 			return err
@@ -197,7 +202,7 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 		putRes.Value = putArgs.Value
 		putRes.PToken = trace.GenerateToken()
 	} else {
-		conn, client := util.MakeClient("", kvs.ServerList[leaderId])
+		conn, client := util.MakeClient("", kvs.ServerList[leaderIdx])
 		trace.RecordAction(PutFwd{
 			ClientId: putArgs.ClientId,
 			Key:      putArgs.Key,
