@@ -4,8 +4,8 @@ import (
 	"cs.ubc.ca/cpsc416/p1/util"
 	"fmt"
 	"github.com/DistributedClocks/tracing"
-	"net/rpc"
 	"net"
+	"net/rpc"
 	"sync"
 )
 
@@ -74,7 +74,7 @@ type KVServer struct {
 	ServerId   int
 	ServerAddr string
 	ServerList []string
-	Raft       *Raft             // this server's Raft instance
+	Raft       *Raft // this server's Raft instance
 	LastLdrID  int
 	Mutex      sync.Mutex
 	Conn       *net.TCPConn
