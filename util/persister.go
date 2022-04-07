@@ -1,6 +1,11 @@
 package util
 
-import "sync"
+import (
+	"bytes"
+	"encoding/gob"
+	"os"
+	"sync"
+)
 
 // Persister interface
 type Persister struct {
@@ -37,5 +42,12 @@ func (ps *Persister) KVStateSize() int {
 // called in raft.persist, and should be after calls to save
 // persist should always append on the file of stable storage instead of overwriting it
 func (ps *Persister) Persist() {
-
+	f, err := os.OpenFile("persistor.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	CheckErr(err, "error opening raft state log file")
+	defer f.Close()
+	buf := new(bytes.Buffer)
+	enc := gob.NewEncoder(buf)
+	err = enc.Encode(ps)
+	_, err = f.Write(buf.Bytes())
+	CheckErr(err, "error writing to log file")
 }
