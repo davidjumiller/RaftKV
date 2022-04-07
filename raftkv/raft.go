@@ -1,6 +1,8 @@
 package raftkv
 
 import (
+	"bytes"
+	"encoding/gob"
 	"fmt"
 	"log"
 	"math/rand"
@@ -265,6 +267,20 @@ func (rf *Raft) persist() {
 // can be left to m2/m3
 //
 func (rf *Raft) readPersist(data []byte) {
+	// check whether the data is empty
+	if data == nil || len(data) < 1 {
+		return
+	}
+
+	buf := bytes.NewBuffer(data)
+	dec := gob.NewDecoder(buf)
+
+	if dec.Decode(&rf.currentTerm) != nil ||
+		dec.Decode(&rf.votedFor) != nil ||
+		dec.Decode(&rf.voteCount) != nil ||
+		dec.Decode(&rf.logs) != nil {
+		log.Printf("error decoding log file data\n")
+	}
 }
 
 // broadcast request vote requests to all peers
