@@ -2,7 +2,6 @@ package raftkv
 
 import (
 	"fmt"
-	"log"
 	"math/rand"
 	"sync"
 	"time"
@@ -381,7 +380,7 @@ func (rf *Raft) sendRequestVote(serverIdx int, args *RequestVoteArgs, reply *Req
 	args.Token = rf.rtrace.GenerateToken()
 	err := rf.peers[serverIdx].Call("Raft.RequestVote", args, reply)
 	if err != nil {
-		log.Printf("error in rpc call server from %v to %v: %v \n", rf.selfidx, serverIdx, err)
+		fmt.Printf("error in rpc call server from %v to %v: %v \n", rf.selfidx, serverIdx, err)
 		return
 	}
 
@@ -441,7 +440,7 @@ func (rf *Raft) sendAppendEntries(serverIdx int, args *AppendEntriesArgs, reply 
 	args.Token = rf.rtrace.GenerateToken()
 	err := rf.peers[serverIdx].Call("Raft.AppendEntries", args, reply)
 	if err != nil {
-		log.Printf("error in rpc call server from %v to %v: %v \n", rf.selfidx, serverIdx, err)
+		fmt.Printf("error in rpc call server from %v to %v: %v \n", rf.selfidx, serverIdx, err)
 		return
 	}
 
