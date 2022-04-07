@@ -148,6 +148,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) erro
 
 }
 
+// check if the log in leader is longer than the log in the follower
 func (rf *Raft) checkLogConsistency(cLastIdx int, cLastTerm int) bool {
 	if cLastTerm == rf.currentTerm {
 		return cLastIdx >= len(rf.logs)-1
