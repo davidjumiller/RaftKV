@@ -277,9 +277,8 @@ func (rf *Raft) readPersist(data []byte) {
 
 	if dec.Decode(&rf.currentTerm) != nil ||
 		dec.Decode(&rf.votedFor) != nil ||
-		dec.Decode(&rf.voteCount) != nil ||
 		dec.Decode(&rf.logs) != nil {
-		log.Printf("error decoding log file data\n")
+		fmt.Println("error decoding log file data")
 	}
 }
 

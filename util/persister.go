@@ -1,6 +1,10 @@
 package util
 
-import "sync"
+import (
+	"fmt"
+	"io/ioutil"
+	"sync"
+)
 
 // Persister interface
 type Persister struct {
@@ -38,4 +42,12 @@ func (ps *Persister) KVStateSize() int {
 // persist should always append on the file of stable storage instead of overwriting it
 func (ps *Persister) Persist() {
 
+}
+
+func (ps *Persister) readPersist() []byte {
+	data, err := ioutil.ReadFile("persister.log")
+	if err != nil {
+		fmt.Printf("reading file error: %v \n", err)
+	}
+	return data
 }
