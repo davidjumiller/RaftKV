@@ -18,12 +18,14 @@ type KvslibStop struct {
 	ClientId string
 }
 
-type Put struct {
+type PutStart struct {
 	ClientId string
 	OpId     uint8
 	Key      string
 	Value    string
 }
+
+type PutSend PutStart
 
 type PutResultRecvd struct {
 	ClientId string
@@ -32,11 +34,13 @@ type PutResultRecvd struct {
 	Value    string
 }
 
-type Get struct {
+type GetStart struct {
 	ClientId string
 	OpId     uint8
 	Key      string
 }
+
+type GetSend GetStart
 
 type BufferedGet struct {
 	Args    *util.GetArgs
@@ -133,8 +137,9 @@ func (d *KVS) Get(tracer *tracing.Tracer, key string) error {
 	localOpId := d.OpId
 	d.OpId = d.OpId + 1
 	d.unlockLog("op", d.OpMutex)
+
+	getArgs := d.createGetArgs(tracer, key, localOpId)
 	if exists && outstandingPuts.Len() > 0 {
-		getArgs := d.createGetArgs(tracer, key, localOpId)
 		elem := outstandingPuts.Back() // get latest put opId for this key
 		put := elem.Value.(*util.PutArgs)
 		bufferedGet := &BufferedGet{
@@ -145,7 +150,6 @@ func (d *KVS) Get(tracer *tracing.Tracer, key string) error {
 		d.BufferedGets[key].PushBack(bufferedGet)
 		d.unlockLog("add buffered get", d.GetMutex)
 	} else {
-		getArgs := d.createGetArgs(tracer, key, localOpId)
 		d.sendGet(getArgs)
 	}
 	return nil
@@ -158,17 +162,9 @@ func (d *KVS) Get(tracer *tracing.Tracer, key string) error {
 // The returned value must be delivered asynchronously via the notify-channel channel returned in the Start call.
 func (d *KVS) Put(tracer *tracing.Tracer, key string, value string) error {
 	localOpId := d.nextOpId()
-	trace := tracer.CreateTrace()
-	trace.RecordAction(Put{d.ClientId, localOpId, key, value})
 
 	// Send put to head via RPC
-	putArgs := &util.PutArgs{
-		ClientId: d.ClientId,
-		OpId:     localOpId,
-		Key:      key,
-		Value:    value,
-		PToken:   trace.GenerateToken(),
-	}
+	putArgs := d.createPutArgs(tracer, key, value, localOpId)
 	d.addOutstandingPut(key, putArgs)
 	go d.sendPut(localOpId, putArgs)
 	return nil
@@ -194,16 +190,33 @@ func (d *KVS) closeRoutines() {
 	close(d.AliveCh)
 }
 
+// Creates PutArgs struct for a new Put
+func (d *KVS) createPutArgs(tracer *tracing.Tracer, key string, value string, localOpId uint8) *util.PutArgs {
+	// Start Put trace
+	trace := tracer.CreateTrace()
+	trace.RecordAction(PutStart{d.ClientId, localOpId, key, value})
+
+	return &util.PutArgs{
+		ClientId: d.ClientId,
+		OpId:     localOpId,
+		Key:      key,
+		Value:    value,
+		PToken:   trace.GenerateToken(),
+	}
+}
+
 // Creates GetArgs struct for a new Get
 func (d *KVS) createGetArgs(tracer *tracing.Tracer, key string, localOpId uint8) *util.GetArgs {
+	// Start Get trace
 	trace := tracer.CreateTrace()
-	getArgs := &util.GetArgs{
+	trace.RecordAction(GetStart{d.ClientId, localOpId, key})
+
+	return &util.GetArgs{
 		ClientId: d.ClientId,
 		OpId:     localOpId,
 		Key:      key,
 		GToken:   trace.GenerateToken(),
 	}
-	return getArgs
 }
 
 // Sends a Get request to a server and prepares to receive the result
@@ -213,7 +226,7 @@ func (d *KVS) sendGet(getArgs *util.GetArgs) {
 	d.unlockLog("rtt", d.RTTMutex)
 
 	trace := d.Tracer.ReceiveToken(getArgs.GToken)
-	trace.RecordAction(Get{getArgs.ClientId, getArgs.OpId, getArgs.Key})
+	trace.RecordAction(GetSend{getArgs.ClientId, getArgs.OpId, getArgs.Key})
 	getArgs.GToken = trace.GenerateToken()
 
 	// M2: Refactor receiving into a new function
@@ -264,13 +277,18 @@ func (d *KVS) sendPut(localOpId uint8, putArgs *util.PutArgs) {
 	d.lockLog("rtt", d.RTTMutex)
 	d.InProgress[localOpId] = time.Now()
 	d.unlockLog("rtt", d.RTTMutex)
+
+	trace := d.Tracer.ReceiveToken(putArgs.PToken)
+	trace.RecordAction(PutSend{putArgs.ClientId, putArgs.OpId, putArgs.Key, putArgs.Value})
+	putArgs.PToken = trace.GenerateToken()
+
 	// M2: Refactor receiving into separate function
 	var putResult util.PutRes
 	err := d.Client.Call("KVServer.Put", putArgs, &putResult)
 	if err != nil {
 		return
 	}
-	trace := d.Tracer.ReceiveToken(putResult.PToken)
+	trace = d.Tracer.ReceiveToken(putResult.PToken)
 	trace.RecordAction(PutResultRecvd{
 		ClientId: putResult.ClientId,
 		OpId:     putResult.OpId,
