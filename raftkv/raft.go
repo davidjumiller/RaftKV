@@ -166,6 +166,20 @@ type ExecuteCommand struct {
 	Command  interface{}
 }
 
+type Commit struct {
+	ID    int
+	Term  int
+	Index int
+}
+
+type Apply struct {
+	ID           int
+	Term         int
+	CommandValid bool
+	Command      interface{}
+	CommandIndex int
+}
+
 //
 // reset the channels, needed when converting server state.
 // lock must be held before calling this.
@@ -494,6 +508,7 @@ func (rf *Raft) Commit() {
 
 		if sentCount >= len(rf.peers)+1 {
 			rf.commitIndex = i
+			rf.rtrace.RecordAction(Commit{rf.selfidx, rf.currentTerm, rf.commitIndex})
 			go rf.apply()
 			break // find the latest idx that hasn't committed but already sent to majority
 		}
@@ -559,11 +574,13 @@ func (rf *Raft) apply() {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	for i := rf.lastApplied + 1; i <= rf.commitIndex; i++ {
-		rf.applyCh <- ApplyMsg{
+		applyMsg := ApplyMsg{
 			CommandValid: true,
 			Command:      rf.logs[i].Command,
 			CommandIndex: i,
 		}
+		rf.applyCh <- applyMsg
+		rf.rtrace.RecordAction(Apply{rf.selfidx, rf.currentTerm, applyMsg.CommandValid, applyMsg.Command, applyMsg.CommandIndex})
 		rf.lastApplied = i
 	}
 }
