@@ -77,11 +77,11 @@ type HBMsg struct {
 }
 
 type Raft struct {
-	mu    sync.Mutex          // Lock to protect shared access to this peer's state
-	peers []*util.RPCEndPoint // RPC end points of all peers
-	// persister *Persister           // Object to hold this peer's persisted state
-	selfidx int  // this peer's index into peers[]
-	dead    bool // set by Kill()
+	mu        sync.Mutex          // Lock to protect shared access to this peer's state
+	peers     []*util.RPCEndPoint // RPC end points of all peers
+	persister *util.Persister     // Object to hold this peer's persisted state
+	selfidx   int                 // this peer's index into peers[]
+	dead      bool                // set by Kill()
 
 	// state a Raft server must maintain.
 	currentTerm int
@@ -266,7 +266,10 @@ func (rf *Raft) persist() {
 // restore previously persisted state.
 // can be left to m2/m3
 //
-func (rf *Raft) readPersist(data []byte) {
+func (rf *Raft) readPersist() {
+	rf.persister.ReadPersist()
+	data := rf.persister.GetRaftState()
+
 	// check whether the data is empty
 	if data == nil || len(data) < 1 {
 		return
