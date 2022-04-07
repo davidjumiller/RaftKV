@@ -31,6 +31,8 @@ type PutResult struct {
 	Value    string
 }
 
+type PutResultFwd PutResult
+
 type GetRecvd struct {
 	ClientId string
 	Key      string
@@ -46,6 +48,8 @@ type GetResult struct {
 	Key      string
 	Value    string
 }
+
+type GetResultFwd GetResult
 
 type ServerStart struct {
 	ServerId int
@@ -159,6 +163,13 @@ func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 		if err != nil {
 			return err
 		}
+		trace = kvs.Tracer.ReceiveToken(getRes.GToken)
+		trace.RecordAction(GetResultFwd{
+			ClientId: getRes.ClientId,
+			Key:      getRes.Key,
+			Value:    getRes.Value,
+		})
+		getRes.GToken = trace.GenerateToken()
 		client.Close()
 		conn.Close()
 	}
@@ -206,6 +217,13 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 		if err != nil {
 			return err
 		}
+		trace = kvs.Tracer.ReceiveToken(putRes.PToken)
+		trace.RecordAction(PutResultFwd{
+			ClientId: putRes.ClientId,
+			Key:      putRes.Key,
+			Value:    putRes.Value,
+		})
+		putRes.PToken = trace.GenerateToken()
 		client.Close()
 		conn.Close()
 	}
