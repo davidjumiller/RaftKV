@@ -3,6 +3,7 @@ package raftkv
 import (
 	"fmt"
 	"math/rand"
+	"net/rpc"
 	"sync"
 	"time"
 
@@ -642,7 +643,7 @@ func (rf *Raft) Kill() {
 // hb into this channel
 //
 func StartRaft(peers []*util.RPCEndPoint, selfidx int,
-	persister *util.Persister, applyCh chan ApplyMsg, tracer *tracing.Tracer) *Raft {
+	persister *util.Persister, applyCh chan ApplyMsg, tracer *tracing.Tracer) (*Raft, error) {
 	rf := &Raft{}
 	rf.dead = false
 	rf.peers = peers
@@ -672,9 +673,17 @@ func StartRaft(peers []*util.RPCEndPoint, selfidx int,
 
 	rf.rtrace.RecordAction(RaftStart{rf.selfidx})
 
+	listener, err := util.StartRPCListener(rf.peers[selfidx].Addr)
+	if err != nil {
+		fmt.Printf("listener error: %v \n", err)
+		return nil, err
+	}
+
+	rpc.Register(rf)
+	go listener.Accept()
 	// raft process called in a goroutine to keep running in the background
 	go rf.runRaft()
-	return rf
+	return rf, nil
 }
 
 func (rf *Raft) runRaft() {
