@@ -117,6 +117,9 @@ func (kvs *KVServer) Start(serverIdx int, serverAddr string, serverList []string
 	trace := tracer.CreateTrace()
 	trace.RecordAction(ServerStart{serverIdx})
 
+	// Check raft state
+	kvs.checkLeader(kvs.Raft.GetState())
+
 	// Start listening for RPCs
 	rpcServer := &RemoteServer{kvs}
 	err := rpc.RegisterName("KVServer", rpcServer)
@@ -250,7 +253,7 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 }
 
 func (kvs *KVServer) checkLeader(raftState RaftState) error {
-	/* Locking to prevent the case where util.TryMakeClient() is called more than once simultaneously, 
+	/* Locking to prevent the case where util.TryMakeClient() is called more than once simultaneously,
 	leading to only one get/put succeeding and the rest dropping their requests */
 	kvs.Mutex.Lock()
 	defer kvs.Mutex.Unlock()
@@ -261,12 +264,14 @@ func (kvs *KVServer) checkLeader(raftState RaftState) error {
 		kvs.Client = nil
 		kvs.LastLdrID = raftState.LeaderID
 		return nil
-	
-	// Case where server needs to make new connection to the leader
+
+		// Case where server needs to make new connection to the leader
 	} else if kvs.LastLdrID != raftState.LeaderID {
 		if kvs.LastLdrID != kvs.ServerIdx {
-			kvs.Client.Close()
-			kvs.Conn.Close()
+			if kvs.Client != nil {
+				kvs.Client.Close()
+				kvs.Conn.Close()
+			}
 		}
 		conn, client, err := util.TryMakeClient(kvs.ServerAddr, kvs.ServerList[raftState.LeaderID])
 		if err != nil {

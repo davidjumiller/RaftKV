@@ -554,7 +554,7 @@ func StartRaft(peers []*util.RPCEndPoint, selfidx int,
 	rf.peers = peers
 	rf.peersLen = len(peers)
 	rf.selfidx = selfidx
-	rf.currLeaderIdx = -1
+	rf.currLeaderIdx = 0 // M2: We will assume 0 is the leader
 	rf.applyCh = applyCh
 
 	fmt.Printf("----- %v Start -----", rf.selfidx)
