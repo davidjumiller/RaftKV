@@ -73,7 +73,7 @@ func (e *RPCEndPoint) Call(methodName string, args interface{}, reply interface{
 
 	err := e.Client.Call(methodName, args, reply)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Printf("%v \n", err)
 		e.Client = nil
 		return err
 	}
@@ -83,7 +83,7 @@ func (e *RPCEndPoint) Call(methodName string, args interface{}, reply interface{
 func Connect(address string) (*rpc.Client, error) {
 	client, err := rpc.Dial("tcp", address)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Printf("%v \n", err)
 		return nil, err
 	}
 
