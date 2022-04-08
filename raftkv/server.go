@@ -74,11 +74,11 @@ type KVServer struct {
 	ServerId   int
 	ServerAddr string
 	ServerList []string
-	Raft       *Raft // this server's Raft instance
-	LastLdrID  int
-	Mutex      sync.Mutex
-	Conn       *net.TCPConn
-	Client     *rpc.Client
+	Raft       *Raft             // this server's Raft instance
+	LastLdrID  int               // This is the ID of the last known leader server
+	Mutex      sync.Mutex        // Mutex lock for KVServer
+	Conn       *net.TCPConn      // TCP Connection to leader server
+	Client     *rpc.Client       // RPC Client for leader server
 	ApplyCh    chan ApplyMsg     // channel to receive updates from Raft
 	Store      map[string]string // in-memory key-value store
 	Tracer     *tracing.Tracer
@@ -182,7 +182,7 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 	// Check if leader connection needs to be updated, if connection can't be made, drop this request
 	err := kvs.checkLeader(raftState)
 	if err != nil {
-		fmt.Print("Connection to leader failed, dropping request")
+		fmt.Println("Connection to leader failed, dropping request")
 		return err
 	}
 
@@ -229,9 +229,19 @@ func (kvs *KVServer) checkLeader(raftState RaftState) error {
 	leading to only one get/put succeeding and the rest dropping their requests */
 	kvs.Mutex.Lock()
 
-	if kvs.LastLdrID != raftState.LeaderID {
-		_ = kvs.Client.Close()
-		_ = kvs.Conn.Close()
+	// Case where server is the leader
+	if kvs.ServerId == raftState.LeaderID {
+		kvs.Conn = nil
+		kvs.Client = nil
+		kvs.LastLdrID = raftState.LeaderID
+		return nil
+	
+	// Case where server needs to make new connection to the leader
+	} else if kvs.LastLdrID != raftState.LeaderID {
+		if kvs.LastLdrID != kvs.ServerId {
+			kvs.Client.Close()
+			kvs.Conn.Close()
+		}
 		conn, client, err := util.TryMakeClient(kvs.ServerAddr, kvs.ServerList[raftState.LeaderID])
 		if err != nil {
 			return err
