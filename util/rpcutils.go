@@ -1,10 +1,11 @@
 package util
 
 import (
-	"github.com/DistributedClocks/tracing"
-	"log"
+	"fmt"
 	"net"
 	"net/rpc"
+
+	"github.com/DistributedClocks/tracing"
 )
 
 type GetArgs struct {
@@ -91,7 +92,7 @@ func (e *RPCEndPoint) Call(methodName string, args interface{}, reply interface{
 
 	err := e.Client.Call(methodName, args, reply)
 	if err != nil {
-		log.Println(err)
+		fmt.Printf("%v \n", err)
 		e.Client = nil
 		return err
 	}
@@ -101,7 +102,7 @@ func (e *RPCEndPoint) Call(methodName string, args interface{}, reply interface{
 func Connect(address string) (*rpc.Client, error) {
 	client, err := rpc.DialHTTP("tcp", address)
 	if err != nil {
-		log.Println(err)
+		fmt.Printf("%v \n", err)
 		return nil, err
 	}
 
