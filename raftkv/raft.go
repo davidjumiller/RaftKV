@@ -1,6 +1,8 @@
 package raftkv
 
 import (
+	"bytes"
+	"encoding/gob"
 	"fmt"
 	"log"
 	"math/rand"
@@ -75,11 +77,11 @@ type HBMsg struct {
 }
 
 type Raft struct {
-	mu    sync.Mutex          // Lock to protect shared access to this peer's state
-	peers []*util.RPCEndPoint // RPC end points of all peers
-	// persister *Persister           // Object to hold this peer's persisted state
-	selfidx int  // this peer's index into peers[]
-	dead    bool // set by Kill()
+	mu        sync.Mutex          // Lock to protect shared access to this peer's state
+	peers     []*util.RPCEndPoint // RPC end points of all peers
+	persister *util.Persister     // Object to hold this peer's persisted state
+	selfidx   int                 // this peer's index into peers[]
+	dead      bool                // set by Kill()
 
 	// state a Raft server must maintain.
 	currentTerm int
@@ -96,11 +98,7 @@ type Raft struct {
 	identity      IdentityType
 	currLeaderIdx int // the idx of current leader, will be -1 if no leader
 	peersLen      int
-	hbCount       int
 	applyCh       chan ApplyMsg
-
-	// doAppendCh    chan int
-	applyCmdLogs map[interface{}]*CommandState
 
 	winElectCh chan bool
 	stepDownCh chan bool
@@ -258,6 +256,15 @@ func (rf *Raft) Execute(command interface{}) error {
 // where it can later be retrieved after a crash and restart.
 //
 func (rf *Raft) persist() {
+	w := new(bytes.Buffer)
+	e := gob.NewEncoder(w)
+	if e.Encode(rf.currentTerm) != nil || e.Encode(rf.votedFor) != nil || e.Encode(rf.logs) != nil {
+		fmt.Println("Error in persist encoding")
+		return
+	}
+	data := w.Bytes()
+	rf.persister.SaveRaftState(data)
+	rf.persister.Persist()
 }
 
 //
@@ -544,7 +551,6 @@ func StartRaft(peers []*util.RPCEndPoint, selfidx int,
 	rf.setToFollower(rf.currentTerm)
 	rf.nextIndex = make([]int, rf.peersLen)
 	rf.matchIndex = make([]int, rf.peersLen)
-	rf.applyCmdLogs = make(map[interface{}]*CommandState)
 	rf.hbCh = make(chan HBMsg, rf.peersLen)
 
 	rf.resetChannels()
