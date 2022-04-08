@@ -228,6 +228,7 @@ func (kvs *KVServer) checkLeader(raftState RaftState) error {
 	/* Locking to prevent the case where util.TryMakeClient() is called more than once simultaneously, 
 	leading to only one get/put succeeding and the rest dropping their requests */
 	kvs.Mutex.Lock()
+	defer kvs.Mutex.Unlock()
 
 	// Case where server is the leader
 	if kvs.ServerId == raftState.LeaderID {
@@ -250,7 +251,5 @@ func (kvs *KVServer) checkLeader(raftState RaftState) error {
 		kvs.Client = client
 		kvs.LastLdrID = raftState.LeaderID
 	}
-
-	kvs.Mutex.Unlock()
 	return nil
 }
