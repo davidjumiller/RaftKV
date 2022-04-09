@@ -1,11 +1,8 @@
 {
-    "ServerId": 2,
-    "ServerAddr": "0.0.0.0:4346",
-    "ServerListenAddr": "0.0.0.0:2346",
-    "RaftListenAddr": "0.0.0.0:3346",
-	"ServerList": ["0.0.0.0:2345", "0.0.0.0:2346", "0.0.0.0:2347"],
-	"RaftList": ["0.0.0.0:3345", "0.0.0.0:3346", "0.0.0.0:3347"],
-	"NumServers": 3,
+    "ServerIdx": 2,
+    "ServerAddr": "0.0.0.0:43470",
+	"ServerList": ["0.0.0.0:23450", "0.0.0.0:23460", "0.0.0.0:23470"],
+	"RaftList": ["0.0.0.0:33450", "0.0.0.0:33460", "0.0.0.0:33470"],
 	"TracingServerAddr": "0.0.0.0:6666",
 	"TracingIdentity": "server2",
 	"Secret": ""

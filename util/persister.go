@@ -1,6 +1,11 @@
 package util
 
-import "sync"
+import (
+	"fmt"
+	"io/ioutil"
+	"os"
+	"sync"
+)
 
 // Persister interface
 type Persister struct {
@@ -33,9 +38,36 @@ func (ps *Persister) KVStateSize() int {
 	return len(ps.persistKVState)
 }
 
+func (ps *Persister) GetRaftState() []byte {
+	return ps.persistRaftState
+}
+
+func (ps *Persister) getKVState() []byte {
+	return ps.persistKVState
+}
+
 // Persist the state of current persistor
 // called in raft.persist, and should be after calls to save
 // persist should always append on the file of stable storage instead of overwriting it
 func (ps *Persister) Persist() {
+	f, err := os.OpenFile("persister.log", os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		fmt.Printf("file open error %v \n", err)
+	}
+	defer f.Close()
+	if err != nil {
+		fmt.Printf("encode error: %v \n", err)
+	}
+	_, err = f.Write(ps.persistRaftState)
+	if err != nil {
+		fmt.Printf("writing file error: %v \n", err)
+	}
+}
 
+func (ps *Persister) ReadPersist() {
+	data, err := ioutil.ReadFile("persister.log")
+	if err != nil {
+		fmt.Printf("reading file error: %v \n", err)
+	}
+	ps.SaveRaftState(data)
 }
