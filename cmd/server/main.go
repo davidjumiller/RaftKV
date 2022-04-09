@@ -1,12 +1,13 @@
 package main
 
 import (
-	"cs.ubc.ca/cpsc416/p1/raftkv"
-	"cs.ubc.ca/cpsc416/p1/util"
 	"fmt"
-	"github.com/DistributedClocks/tracing"
 	"os"
 	"strconv"
+
+	"cs.ubc.ca/cpsc416/p1/raftkv"
+	"cs.ubc.ca/cpsc416/p1/util"
+	"github.com/DistributedClocks/tracing"
 )
 
 func main() {
@@ -28,11 +29,17 @@ func main() {
 		Secret:         config.Secret,
 	})
 
+	rtracer := tracing.NewTracer(tracing.TracerConfig{
+		ServerAddress:  config.TracingServerAddr,
+		TracerIdentity: fmt.Sprintf("raft%v", serverId),
+		Secret:         config.Secret,
+	})
+
 	// Start Raft
 	var peers []*util.RPCEndPoint
 	persister := util.MakePersister()
 	applyCh := make(chan raftkv.ApplyMsg)
-	raft := raftkv.StartRaft(peers, serverIdx, persister, applyCh)
+	raft, err := raftkv.StartRaft(peers, serverIdx, persister, applyCh, rtracer)
 
 	// Start Server
 	server := raftkv.NewServer()

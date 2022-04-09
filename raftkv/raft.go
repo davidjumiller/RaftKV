@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"encoding/gob"
 	"fmt"
-	"log"
 	"math/rand"
+	"net/rpc"
 	"sync"
 	"time"
 
 	"cs.ubc.ca/cpsc416/p1/util"
+	"github.com/DistributedClocks/tracing"
 )
 
 type ApplyMsg struct {
@@ -49,20 +50,23 @@ type RequestVoteArgs struct {
 	CandidateId  int // Candidate ID
 	LastLogIndex int // Candidate's last log index
 	LastLogTerm  int // Candidate's term of last log index
+	Token        tracing.TracingToken
 }
 
 type RequestVoteReply struct {
 	Term        int  // Current Term
 	VoteGranted bool // True if candidate is accepted, false if candidate vote is rejected
+	Token       tracing.TracingToken
 }
 
 type AppendEntriesArgs struct {
-	Term         int        // leader's term
-	LeaderId     int        // leader's id
-	PrevLogIndex int        // previous log index
-	PrevLogTerm  int        // term of previous log index's log
-	Entries      []LogEntry // logs that need to be persisted
-	LeaderCommit int        // last index of committed log
+	Term         int                  // leader's term
+	LeaderId     int                  // leader's id
+	PrevLogIndex int                  // previous log index
+	PrevLogTerm  int                  // term of previous log index's log
+	Entries      []LogEntry           // logs that need to be persisted
+	LeaderCommit int                  // last index of committed log
+	Token        tracing.TracingToken // token for tracing
 }
 
 type AppendEntriesReply struct {
@@ -71,9 +75,12 @@ type AppendEntriesReply struct {
 	PrevLogIndex  int
 	ConflictTerm  int // -1 if no conflict, otherwise it's the smallest term number where leader doesn't agree with the follower
 	ConflictIndex int // -1 if no conflict, otherwise it's the smallest log index of conflict
+	Token         tracing.TracingToken
 }
 
 type HBMsg struct {
+	Term     int
+	LeaderId int
 }
 
 type Raft struct {
@@ -104,6 +111,92 @@ type Raft struct {
 	stepDownCh chan bool
 	voteCh     chan bool
 	hbCh       chan HBMsg
+
+	// for tracing purpose
+	rtrace *tracing.Trace // record the raft's lifetime event (e.g. start, end, request, response)
+}
+
+// struct for tracing
+type RaftStart struct {
+	idx int
+}
+
+type RaftEnd struct {
+	idx int
+}
+
+type ReceiveRequestVote struct {
+	Term         int // Candidate term
+	CandidateId  int // Candidate ID
+	LastLogIndex int // Candidate's last log index
+	LastLogTerm  int // Candidate's term of last log index
+	ReceiveID    int // ID of raft instace that receives the request vote
+}
+
+type SendRequestVote struct {
+	Term         int // Candidate term
+	CandidateId  int // Candidate ID
+	LastLogIndex int // Candidate's last log index
+	LastLogTerm  int // Candidate's term of last log index
+	SendID       int // ID of raft instance that sends the request vote
+}
+
+type RequestVoteRes struct {
+	Term        int  // Current Term
+	VoteGranted bool // True if candidate is accepted, false if candidate vote is rejected
+	ReceiveID   int  // ID of receiver
+	SendID      int  // ID of sender
+}
+
+type LeaderElected struct {
+	Term     int
+	LeaderID int
+}
+
+type SendAppendEntries struct {
+	Term         int // leader's term
+	LeaderId     int // leader's id
+	PrevLogIndex int // previous log index
+	PrevLogTerm  int // term of previous log index's log
+	LeaderCommit int // last index of committed log
+	SendID       int // ID of raft instance that sends the request vote
+}
+
+type ReceiveAppendEntries struct {
+	Term         int // leader's term
+	LeaderId     int // leader's id
+	PrevLogIndex int // previous log index
+	PrevLogTerm  int // term of previous log index's log
+	LeaderCommit int // last index of committed log
+	ReceiveID    int // ID of raft instace that receives the request vote
+}
+
+type AppendEntriesRes struct {
+	Term          int  // current term, used by the leader to update itself
+	Success       bool // true if PrevLogIndex and PrevLogTerm is matched (for consistency)
+	PrevLogIndex  int
+	ConflictTerm  int // -1 if no conflict, otherwise it's the smallest term number where leader doesn't agree with the follower
+	ConflictIndex int // -1 if no conflict, otherwise it's the smallest log index of conflict
+}
+
+type ExecuteCommand struct {
+	Term     int
+	LeaderID int
+	Command  interface{}
+}
+
+type Commit struct {
+	ID    int
+	Term  int
+	Index int
+}
+
+type Apply struct {
+	ID           int
+	Term         int
+	CommandValid bool
+	Command      interface{}
+	CommandIndex int
 }
 
 //
@@ -125,6 +218,10 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) erro
 	reply.Term = rf.currentTerm
 	reply.VoteGranted = false
 
+	trace := rf.rtrace.Tracer.ReceiveToken(args.Token)
+	trace.RecordAction(ReceiveRequestVote{args.Term, args.CandidateId, args.LastLogIndex, args.LastLogTerm, rf.selfidx})
+
+	reply.Token = trace.GenerateToken()
 	if args.Term < rf.currentTerm {
 		return nil
 	}
@@ -146,6 +243,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) erro
 
 }
 
+// check if the log in leader is longer than the log in the follower
 func (rf *Raft) checkLogConsistency(cLastIdx int, cLastTerm int) bool {
 	if cLastTerm == rf.currentTerm {
 		return cLastIdx >= len(rf.logs)-1
@@ -166,6 +264,10 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	reply.ConflictIndex = -1
 	reply.ConflictTerm = -1
 
+	trace := rf.rtrace.Tracer.ReceiveToken(args.Token)
+	trace.RecordAction(ReceiveAppendEntries{args.Term, args.LeaderId, args.PrevLogIndex, args.PrevLogTerm, args.LeaderCommit, rf.selfidx})
+
+	reply.Token = trace.GenerateToken()
 	if args.Term < rf.currentTerm {
 		return nil
 	}
@@ -175,7 +277,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 
 	lastIndex := len(rf.logs) - 1
-	rf.hbCh <- HBMsg{}
+	rf.hbCh <- HBMsg{args.Term, args.LeaderId}
 
 	// follower's log is shorter than the leader
 	if args.PrevLogIndex > lastIndex {
@@ -246,6 +348,7 @@ func (rf *Raft) Execute(command interface{}) error {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
+	rf.rtrace.RecordAction(ExecuteCommand{rf.currentTerm, rf.currLeaderIdx, command})
 	rf.logs = append(rf.logs, LogEntry{command, rf.currentTerm, len(rf.logs)})
 
 	return nil
@@ -319,14 +422,20 @@ func (rf *Raft) broadcastRequestVote() {
 // handler function (including whether they are pointers).
 //
 func (rf *Raft) sendRequestVote(serverIdx int, args *RequestVoteArgs, reply *RequestVoteReply) {
+	trace := rf.rtrace.Tracer.CreateTrace()
+	trace.RecordAction(SendRequestVote{args.Term, args.CandidateId, args.LastLogIndex, args.LastLogTerm, rf.selfidx})
+	args.Token = trace.GenerateToken()
 	err := rf.peers[serverIdx].Call("Raft.RequestVote", args, reply)
 	if err != nil {
-		log.Printf("error in rpc call server from %v to %v: %v \n", rf.selfidx, serverIdx, err)
+		fmt.Printf("error in rpc call server from %v to %v: %v \n", rf.selfidx, serverIdx, err)
 		return
 	}
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+
+	trace = rf.rtrace.Tracer.ReceiveToken(reply.Token)
+	trace.RecordAction(RequestVoteRes{reply.Term, reply.VoteGranted, serverIdx, rf.selfidx})
 
 	if rf.identity != CANDIDATE || args.Term != rf.currentTerm || reply.Term < rf.currentTerm {
 		return
@@ -341,6 +450,7 @@ func (rf *Raft) sendRequestVote(serverIdx int, args *RequestVoteArgs, reply *Req
 		rf.voteCount++
 		if rf.voteCount >= len(rf.peers)/2+1 {
 			rf.winElectCh <- true
+			trace.RecordAction(LeaderElected{rf.currentTerm, rf.selfidx})
 		}
 	}
 
@@ -377,14 +487,20 @@ func (rf *Raft) broadcastAppendEntries() {
 }
 
 func (rf *Raft) sendAppendEntries(serverIdx int, args *AppendEntriesArgs, reply *AppendEntriesReply) {
+	trace := rf.rtrace.Tracer.CreateTrace()
+	trace.RecordAction(SendAppendEntries{args.Term, args.LeaderId, args.PrevLogIndex, args.PrevLogTerm, args.LeaderCommit, rf.selfidx})
+	args.Token = trace.GenerateToken()
 	err := rf.peers[serverIdx].Call("Raft.AppendEntries", args, reply)
 	if err != nil {
-		log.Printf("error in rpc call server from %v to %v: %v \n", rf.selfidx, serverIdx, err)
+		fmt.Printf("error in rpc call server from %v to %v: %v \n", rf.selfidx, serverIdx, err)
 		return
 	}
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+
+	trace = trace.Tracer.ReceiveToken(reply.Token)
+	trace.RecordAction(AppendEntriesRes{reply.Term, reply.Success, reply.PrevLogIndex, reply.ConflictTerm, reply.ConflictIndex})
 	if rf.identity != LEADER || args.Term != rf.currentTerm || reply.Term < rf.currentTerm {
 		return
 	}
@@ -425,13 +541,13 @@ func (rf *Raft) sendAppendEntries(serverIdx int, args *AppendEntriesArgs, reply 
 		rf.matchIndex[serverIdx] = newNextIndex - 1
 	}
 
-	rf.Commit()
+	rf.Commit(trace)
 }
 
 // if there's an idx i where i >= rf.commitIndex and
 // for majority peers, the matchIdx of that peer >= i (it's sent to more than majority of peers)
 // update commitIdx to i and apply
-func (rf *Raft) Commit() {
+func (rf *Raft) Commit(trace *tracing.Trace) {
 	for i := len(rf.logs) - 1; i >= rf.commitIndex; i-- {
 		sentCount := 1 // count itself
 
@@ -446,6 +562,7 @@ func (rf *Raft) Commit() {
 
 		if sentCount >= len(rf.peers)+1 {
 			rf.commitIndex = i
+			trace.RecordAction(Commit{rf.selfidx, rf.currentTerm, i})
 			go rf.apply()
 			break // find the latest idx that hasn't committed but already sent to majority
 		}
@@ -503,7 +620,6 @@ func (rf *Raft) setToLeader() {
 		rf.nextIndex[i] = lastIndex
 	}
 
-	// TODO: broadcast appendentries
 	rf.broadcastAppendEntries()
 }
 
@@ -512,11 +628,13 @@ func (rf *Raft) apply() {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	for i := rf.lastApplied + 1; i <= rf.commitIndex; i++ {
-		rf.applyCh <- ApplyMsg{
+		applyMsg := ApplyMsg{
 			CommandValid: true,
 			Command:      rf.logs[i].Command,
 			CommandIndex: i,
 		}
+		rf.applyCh <- applyMsg
+		rf.rtrace.RecordAction(Apply{rf.selfidx, rf.currentTerm, applyMsg.CommandValid, applyMsg.Command, applyMsg.CommandIndex})
 		rf.lastApplied = i
 	}
 }
@@ -531,6 +649,7 @@ func (rf *Raft) Kill() {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	rf.dead = true
+	rf.rtrace.RecordAction(RaftEnd{rf.selfidx})
 }
 
 // init and start a raft instance
@@ -548,7 +667,7 @@ func (rf *Raft) Kill() {
 // hb into this channel
 //
 func StartRaft(peers []*util.RPCEndPoint, selfidx int,
-	persister *util.Persister, applyCh chan ApplyMsg) *Raft {
+	persister *util.Persister, applyCh chan ApplyMsg, tracer *tracing.Tracer) (*Raft, error) {
 	rf := &Raft{}
 	rf.dead = false
 	rf.peers = peers
@@ -573,9 +692,20 @@ func StartRaft(peers []*util.RPCEndPoint, selfidx int,
 
 	rand.Seed(time.Now().UnixNano())
 
+	rf.rtrace = tracer.CreateTrace()
+
+	rf.rtrace.RecordAction(RaftStart{rf.selfidx})
+
+	_, err := util.StartRPCListener(rf.peers[selfidx].Addr)
+	if err != nil {
+		fmt.Printf("listener error: %v \n", err)
+		return nil, err
+	}
+
+	rpc.Register(rf)
 	// raft process called in a goroutine to keep running in the background
 	go rf.runRaft()
-	return rf
+	return rf, nil
 }
 
 func (rf *Raft) runRaft() {

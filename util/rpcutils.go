@@ -100,7 +100,7 @@ func (e *RPCEndPoint) Call(methodName string, args interface{}, reply interface{
 }
 
 func Connect(address string) (*rpc.Client, error) {
-	client, err := rpc.DialHTTP("tcp", address)
+	client, err := rpc.Dial("tcp", address)
 	if err != nil {
 		fmt.Printf("%v \n", err)
 		return nil, err
