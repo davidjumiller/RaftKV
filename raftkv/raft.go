@@ -118,11 +118,11 @@ type Raft struct {
 
 // struct for tracing
 type RaftStart struct {
-	idx int
+	Idx int
 }
 
 type RaftEnd struct {
-	idx int
+	Idx int
 }
 
 type ReceiveRequestVote struct {
@@ -215,6 +215,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) erro
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
+	oldTerm := rf.currentTerm // TODO: Give this a more descriptive name
 	reply.Term = rf.currentTerm
 	reply.VoteGranted = false
 
@@ -228,10 +229,9 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) erro
 
 	if args.Term > rf.currentTerm {
 		rf.setToFollower(args.Term)
-		return nil
 	}
 
-	if (rf.votedFor < 0 || rf.votedFor == args.CandidateId) && rf.checkLogConsistency(args.LastLogIndex, args.LastLogTerm) {
+	if (rf.votedFor < 0 || rf.votedFor == args.CandidateId) && rf.checkLogConsistency(args.LastLogIndex, args.LastLogTerm, oldTerm) {
 		reply.Term = rf.currentTerm
 		reply.VoteGranted = true
 
@@ -244,12 +244,12 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) erro
 }
 
 // check if the log in leader is longer than the log in the follower
-func (rf *Raft) checkLogConsistency(cLastIdx int, cLastTerm int) bool {
-	if cLastTerm == rf.currentTerm {
+func (rf *Raft) checkLogConsistency(cLastIdx, cLastTerm, term int) bool {
+	if cLastTerm == term {
 		return cLastIdx >= len(rf.logs)-1
 	}
 
-	return cLastTerm > rf.currentTerm
+	return cLastTerm > term
 }
 
 // AppendEntries endpoint
@@ -396,16 +396,16 @@ func (rf *Raft) readPersist() {
 // broadcast request vote requests to all peers
 // must be called after lock is held
 func (rf *Raft) broadcastRequestVote() {
-	args := &RequestVoteArgs{}
-	args.CandidateId = rf.selfidx
-	args.LastLogIndex = len(rf.logs) - 1
-	args.LastLogTerm = rf.logs[args.LastLogIndex].Term
-	reply := &RequestVoteReply{}
-
 	for i := range rf.peers {
 		if i == rf.selfidx {
 			continue
 		}
+		args := &RequestVoteArgs{}
+		args.Term = rf.currentTerm
+		args.CandidateId = rf.selfidx
+		args.LastLogIndex = len(rf.logs) - 1
+		args.LastLogTerm = rf.logs[args.LastLogIndex].Term
+		reply := &RequestVoteReply{}
 
 		go rf.sendRequestVote(i, args, reply)
 	}
@@ -676,7 +676,6 @@ func StartRaft(peers []*util.RPCEndPoint, selfidx int,
 	rf.currLeaderIdx = 0 // M2: We will assume 0 is the leader
 	rf.applyCh = applyCh
 
-	fmt.Printf("----- %v Start -----", rf.selfidx)
 	rf.votedFor = -1
 	rf.logs = append(rf.logs, LogEntry{
 		Command: "Start",
@@ -730,7 +729,6 @@ func (rf *Raft) runRaft() {
 			case <-time.After(time.Duration(randomTimeout(700, 1000)) * time.Millisecond):
 				rf.setToCandidate(CANDIDATE)
 			}
-
 		case LEADER:
 			rf.mu.Unlock()
 			select {
@@ -742,6 +740,5 @@ func (rf *Raft) runRaft() {
 				rf.mu.Unlock()
 			}
 		}
-
 	}
 }

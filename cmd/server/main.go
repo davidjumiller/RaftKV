@@ -22,21 +22,24 @@ func main() {
 	err = util.ReadJSONConfig(filename, &config)
 	util.CheckErr(err, "failed to locate or parse config for server %d", serverIdx)
 
-	// Create server tracer
+	// Create tracers for Server and Raft
 	stracer := tracing.NewTracer(tracing.TracerConfig{
 		ServerAddress:  config.TracingServerAddr,
-		TracerIdentity: config.TracingIdentity,
+		TracerIdentity: fmt.Sprintf("server%d", serverIdx),
 		Secret:         config.Secret,
 	})
-
 	rtracer := tracing.NewTracer(tracing.TracerConfig{
 		ServerAddress:  config.TracingServerAddr,
-		TracerIdentity: fmt.Sprintf("raft%v", serverId),
+		TracerIdentity: fmt.Sprintf("raft%d", serverIdx),
 		Secret:         config.Secret,
 	})
 
 	// Start Raft
 	var peers []*util.RPCEndPoint
+	for _, raftAddr := range config.RaftList {
+		peer := &util.RPCEndPoint{raftAddr, nil}
+		peers = append(peers, peer)
+	}
 	persister := util.MakePersister()
 	applyCh := make(chan raftkv.ApplyMsg)
 	raft, err := raftkv.StartRaft(peers, serverIdx, persister, applyCh, rtracer)
