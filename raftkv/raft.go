@@ -215,7 +215,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) erro
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	oldTerm := rf.currentTerm // TODO: Give this a more descriptive name
 	reply.Term = rf.currentTerm
 	reply.VoteGranted = false
 
@@ -231,7 +230,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) erro
 		rf.setToFollower(args.Term)
 	}
 
-	if (rf.votedFor < 0 || rf.votedFor == args.CandidateId) && rf.checkLogConsistency(args.LastLogIndex, args.LastLogTerm, oldTerm) {
+	if (rf.votedFor < 0 || rf.votedFor == args.CandidateId) && rf.checkLogConsistency(args.LastLogIndex, args.LastLogTerm) {
 		reply.Term = rf.currentTerm
 		reply.VoteGranted = true
 
@@ -244,12 +243,14 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) erro
 }
 
 // check if the log in leader is longer than the log in the follower
-func (rf *Raft) checkLogConsistency(cLastIdx, cLastTerm, term int) bool {
-	if cLastTerm == term {
-		return cLastIdx >= len(rf.logs)-1
+func (rf *Raft) checkLogConsistency(cLastIdx, cLastTerm int) bool {
+	lastIdx := len(rf.logs) - 1
+	lastLog := rf.logs[lastIdx]
+	if cLastTerm == lastLog.Term {
+		return cLastIdx >= lastLog.Index
 	}
 
-	return cLastTerm > term
+	return cLastTerm > lastLog.Term
 }
 
 // AppendEntries endpoint
@@ -715,6 +716,7 @@ func (rf *Raft) runRaft() {
 			rf.mu.Unlock()
 			select {
 			case <-rf.hbCh:
+			case <-rf.voteCh:
 			case <-time.After(time.Duration(randomTimeout(700, 1000)) * time.Millisecond):
 				rf.setToCandidate(FOLLOWER)
 			}
