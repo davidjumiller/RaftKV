@@ -374,7 +374,23 @@ func (rf *Raft) persist() {
 // restore previously persisted state.
 // can be left to m2/m3
 //
-func (rf *Raft) readPersist(data []byte) {
+func (rf *Raft) readPersist() {
+	rf.persister.ReadPersist()
+	data := rf.persister.GetRaftState()
+
+	// check whether the data is empty
+	if data == nil || len(data) < 1 {
+		return
+	}
+
+	buf := bytes.NewBuffer(data)
+	dec := gob.NewDecoder(buf)
+
+	if dec.Decode(&rf.currentTerm) != nil ||
+		dec.Decode(&rf.votedFor) != nil ||
+		dec.Decode(&rf.logs) != nil {
+		fmt.Println("error decoding log file data")
+	}
 }
 
 // broadcast request vote requests to all peers
@@ -657,7 +673,7 @@ func StartRaft(peers []*util.RPCEndPoint, selfidx int,
 	rf.peers = peers
 	rf.peersLen = len(peers)
 	rf.selfidx = selfidx
-	rf.currLeaderIdx = -1
+	rf.currLeaderIdx = 0 // M2: We will assume 0 is the leader
 	rf.applyCh = applyCh
 
 	fmt.Printf("----- %v Start -----", rf.selfidx)

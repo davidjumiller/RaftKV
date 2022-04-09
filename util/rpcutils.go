@@ -57,6 +57,25 @@ func MakeClient(localAddr string, remoteAddr string) (*net.TCPConn, *rpc.Client)
 	return conn, client
 }
 
+// TryMakeConnection Creates and returns a TCP connection between localAddr and remoteAddr, returns an error if unsuccessful
+func TryMakeConnection(localAddr string, remoteAddr string) (*net.TCPConn, error) {
+	localTcpAddr, err := net.ResolveTCPAddr("tcp", localAddr)
+	if err != nil { return nil, err }
+	remoteTcpAddr, err := net.ResolveTCPAddr("tcp", remoteAddr)
+	if err != nil { return nil, err }
+	conn, err := net.DialTCP("tcp", localTcpAddr, remoteTcpAddr)
+	if err != nil { return nil, err }
+	return conn, nil
+}
+
+// TryMakeClient Creates an RPC client given between a local and remote address, returns an error if unsuccessful
+func TryMakeClient(localAddr string, remoteAddr string) (*net.TCPConn, *rpc.Client, error) {
+	conn, err := TryMakeConnection(localAddr, remoteAddr)
+	if err != nil { return nil, nil, err }
+	client := rpc.NewClient(conn)
+	return conn, client, nil
+}
+
 type RPCEndPoint struct {
 	Addr   string
 	Client *rpc.Client

@@ -56,7 +56,7 @@ func main() {
 	err = client.Get(tracer, "key1")
 	util.CheckErr(err, "Error getting value %v, opId: %v\b", err)
 
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 9; i++ {
 		result := <-notifCh
 		log.Println(result)
 	}
