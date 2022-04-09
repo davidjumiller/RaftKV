@@ -64,7 +64,7 @@ type AppendEntriesArgs struct {
 	LeaderId     int                  // leader's id
 	PrevLogIndex int                  // previous log index
 	PrevLogTerm  int                  // term of previous log index's log
-	Entries      []LogEntry           // logs that need to be persisted
+	Entries      []LogEntry           // Logs that need to be persisted
 	LeaderCommit int                  // last index of committed log
 	Token        tracing.TracingToken // token for tracing
 }
@@ -84,36 +84,40 @@ type HBMsg struct {
 }
 
 type Raft struct {
-	mu        sync.Mutex          // Lock to protect shared access to this peer's state
-	peers     []*util.RPCEndPoint // RPC end points of all peers
-	persister *util.Persister     // Object to hold this peer's persisted state
-	selfidx   int                 // this peer's index into peers[]
-	dead      bool                // set by Kill()
+	Mutex     sync.Mutex          // Lock to protect shared access to this peer's state
+	Peers     []*util.RPCEndPoint // RPC end points of all Peers
+	Persister *util.Persister     // Object to hold this peer's persisted state
+	SelfIndex int                 // this peer's index into Peers[]
+	Dead      bool                // set by Kill()
 
 	// state a Raft server must maintain.
-	currentTerm int
-	votedFor    int        // the candidate id which got the vote
-	voteCount   int        // count of vote in this round of election
-	logs        []LogEntry // logs for command and term
+	CurrentTerm int
+	VotedFor    int        // the candidate id which got the vote
+	VoteCount   int        // count of vote in this round of election
+	Logs        []LogEntry // Logs for command and term
 
-	commitIndex int // largest committed log index
-	lastApplied int // last log index that applied to local state machine
+	CommitIndex int // largest committed log index
+	LastApplied int // last log index that applied to local state machine
 
-	nextIndex  []int // For each server, the next log index that we need to send (init as leader's last log index + 1)
-	matchIndex []int // For each server, the largest log index that we already sent
+	NextIndex  []int // For each server, the next log index that we need to send (init as leader's last log index + 1)
+	MatchIndex []int // For each server, the largest log index that we already sent
 
-	identity      IdentityType
-	currLeaderIdx int // the idx of current leader, will be -1 if no leader
-	peersLen      int
-	applyCh       chan ApplyMsg
+	Identity        IdentityType
+	CurrLeaderIndex int // the idx of current leader, will be -1 if no leader
+	PeersLen        int
+	ApplyCh         chan ApplyMsg
 
-	winElectCh chan bool
-	stepDownCh chan bool
-	voteCh     chan bool
-	hbCh       chan HBMsg
+	WinElectCh chan bool
+	StepDownCh chan bool
+	VoteCh     chan bool
+	HbCh       chan HBMsg
 
 	// for tracing purpose
-	rtrace *tracing.Trace // record the raft's lifetime event (e.g. start, end, request, response)
+	RTrace *tracing.Trace // record the raft's lifetime event (e.g. start, end, request, response)
+}
+
+type RemoteRaft struct {
+	Raft *Raft
 }
 
 // struct for tracing
@@ -204,39 +208,40 @@ type Apply struct {
 // lock must be held before calling this.
 //
 func (rf *Raft) resetChannels() {
-	rf.winElectCh = make(chan bool, 1)
-	rf.stepDownCh = make(chan bool, 1)
-	rf.voteCh = make(chan bool, 1)
+	rf.WinElectCh = make(chan bool, 1)
+	rf.StepDownCh = make(chan bool, 1)
+	rf.VoteCh = make(chan bool, 1)
 }
 
 // RequestVote endpoint
 // called when other raft instances are candidate and this instance is follower
-func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) error {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
+func (remoteRaft *RemoteRaft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) error {
+	rf := remoteRaft.Raft
+	rf.Mutex.Lock()
+	defer rf.Mutex.Unlock()
 
-	oldTerm := rf.currentTerm // TODO: Give this a more descriptive name
-	reply.Term = rf.currentTerm
+	oldTerm := rf.CurrentTerm // TODO: Give this a more descriptive name
+	reply.Term = rf.CurrentTerm
 	reply.VoteGranted = false
 
-	trace := rf.rtrace.Tracer.ReceiveToken(args.Token)
-	trace.RecordAction(ReceiveRequestVote{args.Term, args.CandidateId, args.LastLogIndex, args.LastLogTerm, rf.selfidx})
+	trace := rf.RTrace.Tracer.ReceiveToken(args.Token)
+	trace.RecordAction(ReceiveRequestVote{args.Term, args.CandidateId, args.LastLogIndex, args.LastLogTerm, rf.SelfIndex})
 
 	reply.Token = trace.GenerateToken()
-	if args.Term < rf.currentTerm {
+	if args.Term < rf.CurrentTerm {
 		return nil
 	}
 
-	if args.Term > rf.currentTerm {
+	if args.Term > rf.CurrentTerm {
 		rf.setToFollower(args.Term)
 	}
 
-	if (rf.votedFor < 0 || rf.votedFor == args.CandidateId) && rf.checkLogConsistency(args.LastLogIndex, args.LastLogTerm, oldTerm) {
-		reply.Term = rf.currentTerm
+	if (rf.VotedFor < 0 || rf.VotedFor == args.CandidateId) && rf.checkLogConsistency(args.LastLogIndex, args.LastLogTerm, oldTerm) {
+		reply.Term = rf.CurrentTerm
 		reply.VoteGranted = true
 
-		rf.votedFor = args.CandidateId
-		rf.voteCh <- true
+		rf.VotedFor = args.CandidateId
+		rf.VoteCh <- true
 	}
 
 	return nil
@@ -246,7 +251,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) erro
 // check if the log in leader is longer than the log in the follower
 func (rf *Raft) checkLogConsistency(cLastIdx, cLastTerm, term int) bool {
 	if cLastTerm == term {
-		return cLastIdx >= len(rf.logs)-1
+		return cLastIdx >= len(rf.Logs)-1
 	}
 
 	return cLastTerm > term
@@ -254,30 +259,31 @@ func (rf *Raft) checkLogConsistency(cLastIdx, cLastTerm, term int) bool {
 
 // AppendEntries endpoint
 // called by the leader of the raft
-func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) error {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
+func (remoteRaft *RemoteRaft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) error {
+	rf := remoteRaft.Raft
+	rf.Mutex.Lock()
+	defer rf.Mutex.Unlock()
 
 	// init reply
-	reply.Term = rf.currentTerm
+	reply.Term = rf.CurrentTerm
 	reply.Success = false
 	reply.ConflictIndex = -1
 	reply.ConflictTerm = -1
 
-	trace := rf.rtrace.Tracer.ReceiveToken(args.Token)
-	trace.RecordAction(ReceiveAppendEntries{args.Term, args.LeaderId, args.PrevLogIndex, args.PrevLogTerm, args.LeaderCommit, rf.selfidx})
+	trace := rf.RTrace.Tracer.ReceiveToken(args.Token)
+	trace.RecordAction(ReceiveAppendEntries{args.Term, args.LeaderId, args.PrevLogIndex, args.PrevLogTerm, args.LeaderCommit, rf.SelfIndex})
 
 	reply.Token = trace.GenerateToken()
-	if args.Term < rf.currentTerm {
+	if args.Term < rf.CurrentTerm {
 		return nil
 	}
 
-	if args.Term > rf.currentTerm {
+	if args.Term > rf.CurrentTerm {
 		rf.setToFollower(args.Term)
 	}
 
-	lastIndex := len(rf.logs) - 1
-	rf.hbCh <- HBMsg{args.Term, args.LeaderId}
+	lastIndex := len(rf.Logs) - 1
+	rf.HbCh <- HBMsg{args.Term, args.LeaderId}
 
 	// follower's log is shorter than the leader
 	if args.PrevLogIndex > lastIndex {
@@ -286,70 +292,70 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 
 	// check if the term matches
-	if cfTerm := rf.logs[args.PrevLogIndex].Term; cfTerm != args.PrevLogTerm {
+	if cfTerm := rf.Logs[args.PrevLogIndex].Term; cfTerm != args.PrevLogTerm {
 		reply.ConflictTerm = cfTerm
-		for i := args.PrevLogIndex; i >= 0 && rf.logs[i].Term == cfTerm; i-- {
+		for i := args.PrevLogIndex; i >= 0 && rf.Logs[i].Term == cfTerm; i-- {
 			reply.ConflictIndex = i
 		}
 		reply.Success = false
 		return nil
 	}
 
-	// check the args.Entries to see if it matches with rf.logs
+	// check the args.Entries to see if it matches with rf.Logs
 	// break when it finds the first
 	i, j := args.PrevLogIndex+1, 0
 	for ; i <= lastIndex && j < len(args.Entries); i, j = i+1, j+1 {
-		if rf.logs[i].Term != args.Entries[j].Term {
+		if rf.Logs[i].Term != args.Entries[j].Term {
 			break
 		}
 	}
 
 	// truncate the log, and use args.Entries to fill in the log
 	// to keep log consistency
-	rf.logs = rf.logs[:i]
+	rf.Logs = rf.Logs[:i]
 	args.Entries = args.Entries[j:]
-	rf.logs = append(rf.logs, args.Entries...)
+	rf.Logs = append(rf.Logs, args.Entries...)
 
 	reply.Success = true
 
 	// update commit index to min(leaderCommit, lastIndex)
-	if args.LeaderCommit > rf.commitIndex {
-		lastIndex = len(rf.logs) - 1
+	if args.LeaderCommit > rf.CommitIndex {
+		lastIndex = len(rf.Logs) - 1
 		if args.LeaderCommit < lastIndex {
-			rf.commitIndex = args.LeaderCommit
+			rf.CommitIndex = args.LeaderCommit
 		} else {
-			rf.commitIndex = lastIndex
+			rf.CommitIndex = lastIndex
 		}
 
 		go rf.apply()
 	}
 
-	rf.currLeaderIdx = args.LeaderId
+	rf.CurrLeaderIndex = args.LeaderId
 
 	return nil
 
 }
 
-// return currentTerm and whether this server
+// return CurrentTerm and whether this server
 // believes it is the leader.
 func (rf *Raft) GetState() RaftState {
 	var term int
-	var isleader bool
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-	fmt.Printf("current term of %v: %v \n", rf.selfidx, rf.currentTerm)
-	term = rf.currentTerm
-	isleader = rf.identity == LEADER
-	return RaftState{len(rf.logs) - 1, term, isleader, rf.currLeaderIdx}
+	var isLeader bool
+	rf.Mutex.Lock()
+	defer rf.Mutex.Unlock()
+	fmt.Printf("current term of %v: %v \n", rf.SelfIndex, rf.CurrentTerm)
+	term = rf.CurrentTerm
+	isLeader = rf.Identity == LEADER
+	return RaftState{len(rf.Logs) - 1, term, isLeader, rf.CurrLeaderIndex}
 }
 
 // Execute a command, called when the server gets a request
 func (rf *Raft) Execute(command interface{}) error {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
+	rf.Mutex.Lock()
+	defer rf.Mutex.Unlock()
 
-	rf.rtrace.RecordAction(ExecuteCommand{rf.currentTerm, rf.currLeaderIdx, command})
-	rf.logs = append(rf.logs, LogEntry{command, rf.currentTerm, len(rf.logs)})
+	rf.RTrace.RecordAction(ExecuteCommand{rf.CurrentTerm, rf.CurrLeaderIndex, command})
+	rf.Logs = append(rf.Logs, LogEntry{command, rf.CurrentTerm, len(rf.Logs)})
 
 	return nil
 }
@@ -361,13 +367,13 @@ func (rf *Raft) Execute(command interface{}) error {
 func (rf *Raft) persist() {
 	w := new(bytes.Buffer)
 	e := gob.NewEncoder(w)
-	if e.Encode(rf.currentTerm) != nil || e.Encode(rf.votedFor) != nil || e.Encode(rf.logs) != nil {
+	if e.Encode(rf.CurrentTerm) != nil || e.Encode(rf.VotedFor) != nil || e.Encode(rf.Logs) != nil {
 		fmt.Println("Error in persist encoding")
 		return
 	}
 	data := w.Bytes()
-	rf.persister.SaveRaftState(data)
-	rf.persister.Persist()
+	rf.Persister.SaveRaftState(data)
+	rf.Persister.Persist()
 }
 
 //
@@ -375,8 +381,8 @@ func (rf *Raft) persist() {
 // can be left to m2/m3
 //
 func (rf *Raft) readPersist() {
-	rf.persister.ReadPersist()
-	data := rf.persister.GetRaftState()
+	rf.Persister.ReadPersist()
+	data := rf.Persister.GetRaftState()
 
 	// check whether the data is empty
 	if data == nil || len(data) < 1 {
@@ -386,25 +392,25 @@ func (rf *Raft) readPersist() {
 	buf := bytes.NewBuffer(data)
 	dec := gob.NewDecoder(buf)
 
-	if dec.Decode(&rf.currentTerm) != nil ||
-		dec.Decode(&rf.votedFor) != nil ||
-		dec.Decode(&rf.logs) != nil {
+	if dec.Decode(&rf.CurrentTerm) != nil ||
+		dec.Decode(&rf.VotedFor) != nil ||
+		dec.Decode(&rf.Logs) != nil {
 		fmt.Println("error decoding log file data")
 	}
 }
 
-// broadcast request vote requests to all peers
+// broadcast request vote requests to all Peers
 // must be called after lock is held
 func (rf *Raft) broadcastRequestVote() {
-	for i := range rf.peers {
-		if i == rf.selfidx {
+	for i := range rf.Peers {
+		if i == rf.SelfIndex {
 			continue
 		}
 		args := &RequestVoteArgs{}
-		args.Term = rf.currentTerm
-		args.CandidateId = rf.selfidx
-		args.LastLogIndex = len(rf.logs) - 1
-		args.LastLogTerm = rf.logs[args.LastLogIndex].Term
+		args.Term = rf.CurrentTerm
+		args.CandidateId = rf.SelfIndex
+		args.LastLogIndex = len(rf.Logs) - 1
+		args.LastLogTerm = rf.Logs[args.LastLogIndex].Term
 		reply := &RequestVoteReply{}
 
 		go rf.sendRequestVote(i, args, reply)
@@ -413,7 +419,7 @@ func (rf *Raft) broadcastRequestVote() {
 
 //
 // send a RequestVote RPC to a server.
-// server is the index of the target server in rf.peers[].
+// server is the index of the target server in rf.Peers[].
 // expects RPC arguments in args.
 // fills in *reply with RPC reply, so caller should
 // pass &reply.
@@ -422,63 +428,63 @@ func (rf *Raft) broadcastRequestVote() {
 // handler function (including whether they are pointers).
 //
 func (rf *Raft) sendRequestVote(serverIdx int, args *RequestVoteArgs, reply *RequestVoteReply) {
-	trace := rf.rtrace.Tracer.CreateTrace()
-	trace.RecordAction(SendRequestVote{args.Term, args.CandidateId, args.LastLogIndex, args.LastLogTerm, rf.selfidx})
+	trace := rf.RTrace.Tracer.CreateTrace()
+	trace.RecordAction(SendRequestVote{args.Term, args.CandidateId, args.LastLogIndex, args.LastLogTerm, rf.SelfIndex})
 	args.Token = trace.GenerateToken()
-	err := rf.peers[serverIdx].Call("Raft.RequestVote", args, reply)
+	err := rf.Peers[serverIdx].Call("Raft.RequestVote", args, reply)
 	if err != nil {
-		fmt.Printf("error in rpc call server from %v to %v: %v \n", rf.selfidx, serverIdx, err)
+		fmt.Printf("error in rpc call server from %v to %v: %v \n", rf.SelfIndex, serverIdx, err)
 		return
 	}
 
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
+	rf.Mutex.Lock()
+	defer rf.Mutex.Unlock()
 
-	trace = rf.rtrace.Tracer.ReceiveToken(reply.Token)
-	trace.RecordAction(RequestVoteRes{reply.Term, reply.VoteGranted, serverIdx, rf.selfidx})
+	trace = rf.RTrace.Tracer.ReceiveToken(reply.Token)
+	trace.RecordAction(RequestVoteRes{reply.Term, reply.VoteGranted, serverIdx, rf.SelfIndex})
 
-	if rf.identity != CANDIDATE || args.Term != rf.currentTerm || reply.Term < rf.currentTerm {
+	if rf.Identity != CANDIDATE || args.Term != rf.CurrentTerm || reply.Term < rf.CurrentTerm {
 		return
 	}
 
-	if reply.Term > rf.currentTerm {
+	if reply.Term > rf.CurrentTerm {
 		rf.setToFollower(reply.Term)
 		return
 	}
 
 	if reply.VoteGranted {
-		rf.voteCount++
-		if rf.voteCount >= len(rf.peers)/2+1 {
-			rf.winElectCh <- true
-			trace.RecordAction(LeaderElected{rf.currentTerm, rf.selfidx})
+		rf.VoteCount++
+		if rf.VoteCount >= len(rf.Peers)/2+1 {
+			rf.WinElectCh <- true
+			trace.RecordAction(LeaderElected{rf.CurrentTerm, rf.SelfIndex})
 		}
 	}
 
 }
 
-// broadcast appendEntries requests to all peers
+// broadcast appendEntries requests to all Peers
 // must be called after lock is held
 func (rf *Raft) broadcastAppendEntries() {
-	if rf.identity != LEADER {
+	if rf.Identity != LEADER {
 		return
 	}
 	args := &AppendEntriesArgs{}
-	args.LeaderId = rf.selfidx
-	args.LeaderCommit = rf.commitIndex
-	args.Term = rf.currentTerm
+	args.LeaderId = rf.SelfIndex
+	args.LeaderCommit = rf.CommitIndex
+	args.Term = rf.CurrentTerm
 
 	reply := &AppendEntriesReply{}
 
-	for i := range rf.peers {
-		if i == rf.selfidx {
+	for i := range rf.Peers {
+		if i == rf.SelfIndex {
 			continue
 		}
 
-		args.PrevLogIndex = rf.nextIndex[i] - 1
-		args.PrevLogTerm = rf.logs[args.PrevLogIndex].Term
+		args.PrevLogIndex = rf.NextIndex[i] - 1
+		args.PrevLogTerm = rf.Logs[args.PrevLogIndex].Term
 
-		// send all entries after rf.nextIndex[i]
-		entries := rf.logs[rf.nextIndex[i]:]
+		// send all entries after rf.NextIndex[i]
+		entries := rf.Logs[rf.NextIndex[i]:]
 		args.Entries = make([]LogEntry, len(entries))
 		copy(args.Entries, entries)
 
@@ -487,82 +493,82 @@ func (rf *Raft) broadcastAppendEntries() {
 }
 
 func (rf *Raft) sendAppendEntries(serverIdx int, args *AppendEntriesArgs, reply *AppendEntriesReply) {
-	trace := rf.rtrace.Tracer.CreateTrace()
-	trace.RecordAction(SendAppendEntries{args.Term, args.LeaderId, args.PrevLogIndex, args.PrevLogTerm, args.LeaderCommit, rf.selfidx})
+	trace := rf.RTrace.Tracer.CreateTrace()
+	trace.RecordAction(SendAppendEntries{args.Term, args.LeaderId, args.PrevLogIndex, args.PrevLogTerm, args.LeaderCommit, rf.SelfIndex})
 	args.Token = trace.GenerateToken()
-	err := rf.peers[serverIdx].Call("Raft.AppendEntries", args, reply)
+	err := rf.Peers[serverIdx].Call("Raft.AppendEntries", args, reply)
 	if err != nil {
-		fmt.Printf("error in rpc call server from %v to %v: %v \n", rf.selfidx, serverIdx, err)
+		fmt.Printf("error in rpc call server from %v to %v: %v \n", rf.SelfIndex, serverIdx, err)
 		return
 	}
 
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
+	rf.Mutex.Lock()
+	defer rf.Mutex.Unlock()
 
 	trace = trace.Tracer.ReceiveToken(reply.Token)
 	trace.RecordAction(AppendEntriesRes{reply.Term, reply.Success, reply.PrevLogIndex, reply.ConflictTerm, reply.ConflictIndex})
-	if rf.identity != LEADER || args.Term != rf.currentTerm || reply.Term < rf.currentTerm {
+	if rf.Identity != LEADER || args.Term != rf.CurrentTerm || reply.Term < rf.CurrentTerm {
 		return
 	}
 
-	if reply.Term > rf.currentTerm {
+	if reply.Term > rf.CurrentTerm {
 		rf.setToFollower(args.Term)
 		return
 	}
 
-	// update matchIndex and nextIndex of followers
+	// update MatchIndex and NextIndex of followers
 	if reply.Success {
 		newMatchIdx := args.PrevLogIndex + len(args.Entries)
-		if newMatchIdx > rf.matchIndex[serverIdx] {
-			rf.matchIndex[serverIdx] = newMatchIdx
+		if newMatchIdx > rf.MatchIndex[serverIdx] {
+			rf.MatchIndex[serverIdx] = newMatchIdx
 		}
 
-		rf.nextIndex[serverIdx] = newMatchIdx + 1
+		rf.NextIndex[serverIdx] = newMatchIdx + 1
 	} else if reply.ConflictTerm < 0 {
 		// follower's log shorter than leader's log
-		rf.nextIndex[serverIdx] = reply.ConflictIndex
-		rf.matchIndex[serverIdx] = reply.ConflictIndex - 1
+		rf.NextIndex[serverIdx] = reply.ConflictIndex
+		rf.MatchIndex[serverIdx] = reply.ConflictIndex - 1
 	} else {
 		// find the conflict term in log
-		newNextIndex := len(rf.logs) - 1
+		newNextIndex := len(rf.Logs) - 1
 		for ; newNextIndex >= 0; newNextIndex-- {
-			if rf.logs[newNextIndex].Term == reply.ConflictTerm {
+			if rf.Logs[newNextIndex].Term == reply.ConflictTerm {
 				break
 			}
 		}
 
 		// if not found, set next index to conflict index
 		if newNextIndex < 0 {
-			rf.nextIndex[serverIdx] = reply.ConflictIndex
+			rf.NextIndex[serverIdx] = reply.ConflictIndex
 		} else {
-			rf.nextIndex[serverIdx] = newNextIndex
+			rf.NextIndex[serverIdx] = newNextIndex
 		}
 
-		rf.matchIndex[serverIdx] = newNextIndex - 1
+		rf.MatchIndex[serverIdx] = newNextIndex - 1
 	}
 
 	rf.Commit(trace)
 }
 
-// if there's an idx i where i >= rf.commitIndex and
-// for majority peers, the matchIdx of that peer >= i (it's sent to more than majority of peers)
+// if there's an idx i where i >= rf.CommitIndex and
+// for majority Peers, the matchIdx of that peer >= i (it's sent to more than majority of Peers)
 // update commitIdx to i and apply
 func (rf *Raft) Commit(trace *tracing.Trace) {
-	for i := len(rf.logs) - 1; i >= rf.commitIndex; i-- {
+	for i := len(rf.Logs) - 1; i >= rf.CommitIndex; i-- {
 		sentCount := 1 // count itself
 
-		for j := range rf.peers {
-			if j == rf.selfidx {
+		for j := range rf.Peers {
+			if j == rf.SelfIndex {
 				continue
 			}
-			if rf.matchIndex[j] >= i {
+			if rf.MatchIndex[j] >= i {
 				sentCount++
 			}
 		}
 
-		if sentCount >= len(rf.peers)+1 {
-			rf.commitIndex = i
-			trace.RecordAction(Commit{rf.selfidx, rf.currentTerm, i})
+		if sentCount >= len(rf.Peers)+1 {
+			rf.CommitIndex = i
+			trace.RecordAction(Commit{rf.SelfIndex, rf.CurrentTerm, i})
 			go rf.apply()
 			break // find the latest idx that hasn't committed but already sent to majority
 		}
@@ -570,31 +576,31 @@ func (rf *Raft) Commit(trace *tracing.Trace) {
 }
 
 func (rf *Raft) setToFollower(term int) {
-	ident := rf.identity
-	rf.identity = FOLLOWER
-	rf.currentTerm = term
-	rf.votedFor = -1
-	rf.voteCount = 0
+	ident := rf.Identity
+	rf.Identity = FOLLOWER
+	rf.CurrentTerm = term
+	rf.VotedFor = -1
+	rf.VoteCount = 0
 
 	if ident != FOLLOWER {
-		rf.stepDownCh <- true
+		rf.StepDownCh <- true
 	}
 }
 
 // set raft state to candidate
 func (rf *Raft) setToCandidate(identityType IdentityType) {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
+	rf.Mutex.Lock()
+	defer rf.Mutex.Unlock()
 
 	// avoid data racing
-	if rf.identity != identityType {
+	if rf.Identity != identityType {
 		return
 	}
 	rf.resetChannels()
-	rf.identity = CANDIDATE
-	rf.currentTerm++
-	rf.votedFor = rf.selfidx
-	rf.voteCount = 1
+	rf.Identity = CANDIDATE
+	rf.CurrentTerm++
+	rf.VotedFor = rf.SelfIndex
+	rf.VoteCount = 1
 
 	// TODO: implment persist and broadcast
 	// rf.persist()
@@ -602,40 +608,40 @@ func (rf *Raft) setToCandidate(identityType IdentityType) {
 }
 
 func (rf *Raft) setToLeader() {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-	if rf.identity != CANDIDATE {
+	rf.Mutex.Lock()
+	defer rf.Mutex.Unlock()
+	if rf.Identity != CANDIDATE {
 		return
 	}
 
 	rf.resetChannels()
-	rf.identity = LEADER
-	rf.currLeaderIdx = rf.selfidx
-	rf.nextIndex = make([]int, len(rf.peers))
-	rf.matchIndex = make([]int, len(rf.peers))
+	rf.Identity = LEADER
+	rf.CurrLeaderIndex = rf.SelfIndex
+	rf.NextIndex = make([]int, len(rf.Peers))
+	rf.MatchIndex = make([]int, len(rf.Peers))
 
-	// init to the index of last log + 1: len(rf.logs) -1 + 1
-	lastIndex := len(rf.logs)
-	for i := range rf.peers {
-		rf.nextIndex[i] = lastIndex
+	// init to the index of last log + 1: len(rf.Logs) -1 + 1
+	lastIndex := len(rf.Logs)
+	for i := range rf.Peers {
+		rf.NextIndex[i] = lastIndex
 	}
 
 	rf.broadcastAppendEntries()
 }
 
-// apply the logs entries that has committed
+// apply the Logs entries that has committed
 func (rf *Raft) apply() {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-	for i := rf.lastApplied + 1; i <= rf.commitIndex; i++ {
+	rf.Mutex.Lock()
+	defer rf.Mutex.Unlock()
+	for i := rf.LastApplied + 1; i <= rf.CommitIndex; i++ {
 		applyMsg := ApplyMsg{
 			CommandValid: true,
-			Command:      rf.logs[i].Command,
+			Command:      rf.Logs[i].Command,
 			CommandIndex: i,
 		}
-		rf.applyCh <- applyMsg
-		rf.rtrace.RecordAction(Apply{rf.selfidx, rf.currentTerm, applyMsg.CommandValid, applyMsg.Command, applyMsg.CommandIndex})
-		rf.lastApplied = i
+		rf.ApplyCh <- applyMsg
+		rf.RTrace.RecordAction(Apply{rf.SelfIndex, rf.CurrentTerm, applyMsg.CommandValid, applyMsg.Command, applyMsg.CommandIndex})
+		rf.LastApplied = i
 	}
 }
 
@@ -646,98 +652,99 @@ func randomTimeout(min, max int) int {
 }
 
 func (rf *Raft) Kill() {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-	rf.dead = true
-	rf.rtrace.RecordAction(RaftEnd{rf.selfidx})
+	rf.Mutex.Lock()
+	defer rf.Mutex.Unlock()
+	rf.Dead = true
+	rf.RTrace.RecordAction(RaftEnd{rf.SelfIndex})
 }
 
 // init and start a raft instance
 //
 // the service or tester wants to create a Raft server. the ports
-// of all the Raft servers (including this one) are in peers[]. this
-// server's port is peers[selfidx]. all the servers' peers[] arrays
-// have the same order. persister is a place for this server to
+// of all the Raft servers (including this one) are in Peers[]. this
+// server's port is Peers[SelfIndex]. all the servers' Peers[] arrays
+// have the same order. Persister is a place for this server to
 // save its persistent state, and also initially holds the most
-// recent saved state, if any. applyCh is a channel on which the
+// recent saved state, if any. ApplyCh is a channel on which the
 // tester or service expects Raft to send ApplyMsg messages.
 // Start() must return quickly, so it should start goroutines
 // for any long-running work.
-// hbCh is the channel for hb msg, the server should setup listener and push
+// HbCh is the channel for hb msg, the server should setup listener and push
 // hb into this channel
 //
 func StartRaft(peers []*util.RPCEndPoint, selfidx int,
 	persister *util.Persister, applyCh chan ApplyMsg, tracer *tracing.Tracer) (*Raft, error) {
 	rf := &Raft{}
-	rf.dead = false
-	rf.peers = peers
-	rf.peersLen = len(peers)
-	rf.selfidx = selfidx
-	rf.currLeaderIdx = 0 // M2: We will assume 0 is the leader
-	rf.applyCh = applyCh
+	rf.Dead = false
+	rf.Peers = peers
+	rf.PeersLen = len(peers)
+	rf.SelfIndex = selfidx
+	rf.CurrLeaderIndex = 0 // M2: We will assume 0 is the leader
+	rf.ApplyCh = applyCh
 
-	rf.votedFor = -1
-	rf.logs = append(rf.logs, LogEntry{
+	rf.VotedFor = -1
+	rf.Logs = append(rf.Logs, LogEntry{
 		Command: "Start",
 		Term:    0,
 		Index:   0,
 	})
-	rf.setToFollower(rf.currentTerm)
-	rf.nextIndex = make([]int, rf.peersLen)
-	rf.matchIndex = make([]int, rf.peersLen)
-	rf.hbCh = make(chan HBMsg, rf.peersLen)
+	rf.setToFollower(rf.CurrentTerm)
+	rf.NextIndex = make([]int, rf.PeersLen)
+	rf.MatchIndex = make([]int, rf.PeersLen)
+	rf.HbCh = make(chan HBMsg, rf.PeersLen)
 
 	rf.resetChannels()
 
 	rand.Seed(time.Now().UnixNano())
 
-	rf.rtrace = tracer.CreateTrace()
+	rf.RTrace = tracer.CreateTrace()
 
-	rf.rtrace.RecordAction(RaftStart{rf.selfidx})
+	rf.RTrace.RecordAction(RaftStart{rf.SelfIndex})
 
-	_, err := util.StartRPCListener(rf.peers[selfidx].Addr)
+	_, err := util.StartRPCListener(rf.Peers[selfidx].Addr)
 	if err != nil {
 		fmt.Printf("listener error: %v \n", err)
 		return nil, err
 	}
 
-	rpc.Register(rf)
+	remoteRaft := &RemoteRaft{Raft: rf}
+	rpc.RegisterName("Raft", remoteRaft)
 	// raft process called in a goroutine to keep running in the background
 	go rf.runRaft()
 	return rf, nil
 }
 
 func (rf *Raft) runRaft() {
-	for !rf.dead {
-		rf.mu.Lock()
-		switch rf.identity {
+	for !rf.Dead {
+		rf.Mutex.Lock()
+		switch rf.Identity {
 		case FOLLOWER:
-			rf.mu.Unlock()
+			rf.Mutex.Unlock()
 			select {
-			case <-rf.hbCh:
-			case <-time.After(time.Duration(randomTimeout(700, 1000)) * time.Millisecond):
+			case <-rf.HbCh:
+			case <-time.After(time.Duration(randomTimeout(3000, 4000)) * time.Millisecond):
 				rf.setToCandidate(FOLLOWER)
 			}
 		case CANDIDATE:
-			rf.mu.Unlock()
+			rf.Mutex.Unlock()
 			select {
-			case <-rf.stepDownCh:
+			case <-rf.StepDownCh:
 			// set to follower will push to stepdown channel
 			// if it's this case then it's already a follower
-			case <-rf.winElectCh:
+			case <-rf.WinElectCh:
 				rf.setToLeader()
-			case <-time.After(time.Duration(randomTimeout(700, 1000)) * time.Millisecond):
+			case <-time.After(time.Duration(randomTimeout(3000, 4000)) * time.Millisecond):
 				rf.setToCandidate(CANDIDATE)
 			}
 		case LEADER:
-			rf.mu.Unlock()
+			rf.Mutex.Unlock()
 			select {
-			case <-rf.stepDownCh:
+			case <-rf.StepDownCh:
 			// same as above
-			case <-time.After(120 * time.Millisecond):
-				rf.mu.Lock()
+			case <-time.After(1000 * time.Millisecond):
+				rf.Mutex.Lock()
 				rf.broadcastAppendEntries()
-				rf.mu.Unlock()
+				rf.Mutex.Unlock()
 			}
 		}
 	}
