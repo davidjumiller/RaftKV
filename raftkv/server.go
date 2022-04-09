@@ -110,7 +110,7 @@ func (kvs *KVServer) Start(serverIdx int, serverAddr string, serverList []string
 	kvs.ServerList = serverList
 	kvs.Tracer = tracer
 	kvs.Raft = raft
-	kvs.ApplyCh = raft.applyCh
+	kvs.ApplyCh = raft.ApplyCh
 	kvs.LastLdrID = -1
 
 	// Begin Server trace
