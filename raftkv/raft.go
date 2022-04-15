@@ -469,10 +469,6 @@ func (rf *Raft) broadcastAppendEntries() {
 	if rf.Identity != LEADER {
 		return
 	}
-	args := &AppendEntriesArgs{}
-	args.LeaderId = rf.SelfIndex
-	args.LeaderCommit = rf.CommitIndex
-	args.Term = rf.CurrentTerm
 
 	reply := &AppendEntriesReply{}
 
@@ -480,6 +476,10 @@ func (rf *Raft) broadcastAppendEntries() {
 		if i == rf.SelfIndex {
 			continue
 		}
+		args := &AppendEntriesArgs{}
+		args.LeaderId = rf.SelfIndex
+		args.LeaderCommit = rf.CommitIndex
+		args.Term = rf.CurrentTerm
 
 		args.PrevLogIndex = rf.NextIndex[i] - 1
 		args.PrevLogTerm = rf.Logs[args.PrevLogIndex].Term
@@ -567,7 +567,7 @@ func (rf *Raft) Commit(trace *tracing.Trace) {
 			}
 		}
 
-		if sentCount >= len(rf.Peers)+1 {
+		if sentCount > len(rf.Peers)/2 {
 			rf.CommitIndex = i
 			trace.RecordAction(Commit{rf.SelfIndex, rf.CurrentTerm, i})
 			go rf.apply()
@@ -697,6 +697,9 @@ func StartRaft(peers []*util.RPCEndPoint, selfidx int,
 	rf.resetChannels()
 
 	rand.Seed(time.Now().UnixNano())
+
+	gob.Register(util.GetArgs{})
+	gob.Register(util.PutArgs{})
 
 	rf.RTrace = tracer.CreateTrace()
 
