@@ -735,7 +735,7 @@ func (rf *Raft) runRaft() {
 			// if it's this case then it's already a follower
 			case <-rf.WinElectCh:
 				rf.setToLeader()
-			case <-time.After(time.Duration(randomTimeout(3000, 4000)) * time.Millisecond):
+			case <-time.After(time.Duration(randomTimeout(700, 1000)) * time.Millisecond):
 				rf.setToCandidate(CANDIDATE)
 			}
 		case LEADER:
@@ -743,7 +743,7 @@ func (rf *Raft) runRaft() {
 			select {
 			case <-rf.StepDownCh:
 			// same as above
-			case <-time.After(1000 * time.Millisecond):
+			case <-time.After(120 * time.Millisecond):
 				rf.Mutex.Lock()
 				rf.broadcastAppendEntries()
 				rf.Mutex.Unlock()
