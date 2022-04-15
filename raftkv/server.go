@@ -161,10 +161,10 @@ func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 	})
 
 	if kvs.ServerIdx == kvs.LastLdrID {
-		err = kvs.Raft.Execute(*getArgs)
-		if err != nil {
-			return err
-		}
+		// Execute (log) Get request on Raft
+		token := kvs.Raft.Execute(*getArgs, trace.GenerateToken())
+		trace = kvs.Tracer.ReceiveToken(token)
+
 		// Return value stored at key
 		val := kvs.Store[getArgs.Key]
 		trace.RecordAction(GetResult{
@@ -218,14 +218,14 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 	})
 
 	if kvs.ServerIdx == kvs.LastLdrID {
-		err = kvs.Raft.Execute(*putArgs)
-		if err != nil {
-			return err
-		}
+		// Execute (log) Put request on Raft
+		token := kvs.Raft.Execute(*putArgs, trace.GenerateToken())
+		trace = kvs.Tracer.ReceiveToken(token)
+
 		trace.RecordAction(PutResult{
 			ClientId: putArgs.ClientId,
 			Key:      putArgs.Key,
-			Value:    kvs.Store[putArgs.Key],
+			Value:    putArgs.Value,
 		})
 		putRes.ClientId = putArgs.ClientId
 		putRes.OpId = putArgs.OpId
