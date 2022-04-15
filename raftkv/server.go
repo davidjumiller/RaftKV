@@ -161,7 +161,7 @@ func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 	})
 
 	if kvs.ServerIdx == kvs.LastLdrID {
-		err = kvs.Raft.Execute(getArgs)
+		err = kvs.Raft.Execute(*getArgs)
 		if err != nil {
 			return err
 		}
@@ -218,7 +218,7 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 	})
 
 	if kvs.ServerIdx == kvs.LastLdrID {
-		err = kvs.Raft.Execute(putArgs)
+		err = kvs.Raft.Execute(*putArgs)
 		if err != nil {
 			return err
 		}
