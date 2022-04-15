@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/rpc"
+	"strconv"
 	"sync"
 	"time"
 
@@ -219,6 +220,7 @@ func (remoteRaft *RemoteRaft) RequestVote(args *RequestVoteArgs, reply *RequestV
 	rf := remoteRaft.Raft
 	rf.Mutex.Lock()
 	defer rf.Mutex.Unlock()
+	defer rf.persist()
 
 	reply.Term = rf.CurrentTerm
 	reply.VoteGranted = false
@@ -264,6 +266,7 @@ func (remoteRaft *RemoteRaft) AppendEntries(args *AppendEntriesArgs, reply *Appe
 	rf := remoteRaft.Raft
 	rf.Mutex.Lock()
 	defer rf.Mutex.Unlock()
+	defer rf.persist()
 
 	// init reply
 	reply.Term = rf.CurrentTerm
@@ -357,6 +360,7 @@ func (rf *Raft) Execute(command interface{}) error {
 
 	rf.RTrace.RecordAction(ExecuteCommand{rf.CurrentTerm, rf.CurrLeaderIndex, command})
 	rf.Logs = append(rf.Logs, LogEntry{command, rf.CurrentTerm, len(rf.Logs)})
+	rf.persist()
 
 	return nil
 }
@@ -374,7 +378,8 @@ func (rf *Raft) persist() {
 	}
 	data := w.Bytes()
 	rf.Persister.SaveRaftState(data)
-	rf.Persister.Persist()
+	fileName := "persister_" + strconv.Itoa(rf.SelfIndex) + ".log"
+	rf.Persister.Persist(fileName)
 }
 
 //
@@ -382,7 +387,11 @@ func (rf *Raft) persist() {
 // can be left to m2/m3
 //
 func (rf *Raft) readPersist() {
-	rf.Persister.ReadPersist()
+	fileName := "persister_" + strconv.Itoa(rf.SelfIndex) + ".log"
+	err := rf.Persister.ReadPersist(fileName)
+	if err != nil {
+		return
+	}
 	data := rf.Persister.GetRaftState()
 
 	// check whether the data is empty
@@ -398,6 +407,7 @@ func (rf *Raft) readPersist() {
 		dec.Decode(&rf.Logs) != nil {
 		fmt.Println("error decoding log file data")
 	}
+	fmt.Printf("readPersistState: %v, %v, %v \n", rf.CurrentTerm, rf.VotedFor, rf.Logs)
 }
 
 // broadcast request vote requests to all Peers
@@ -450,6 +460,7 @@ func (rf *Raft) sendRequestVote(serverIdx int, args *RequestVoteArgs, reply *Req
 
 	if reply.Term > rf.CurrentTerm {
 		rf.setToFollower(reply.Term)
+		rf.persist()
 		return
 	}
 
@@ -505,6 +516,7 @@ func (rf *Raft) sendAppendEntries(serverIdx int, args *AppendEntriesArgs, reply 
 
 	rf.Mutex.Lock()
 	defer rf.Mutex.Unlock()
+	defer rf.persist()
 
 	trace = trace.Tracer.ReceiveToken(reply.Token)
 	trace.RecordAction(AppendEntriesRes{reply.Term, reply.Success, reply.PrevLogIndex, reply.ConflictTerm, reply.ConflictIndex})
@@ -603,8 +615,8 @@ func (rf *Raft) setToCandidate(identityType IdentityType) {
 	rf.VotedFor = rf.SelfIndex
 	rf.VoteCount = 1
 
-	// TODO: implment persist and broadcast
-	// rf.persist()
+	// TODO: implement persist and broadcast
+	rf.persist()
 	rf.broadcastRequestVote()
 }
 
@@ -689,6 +701,11 @@ func StartRaft(peers []*util.RPCEndPoint, selfidx int,
 		Term:    0,
 		Index:   0,
 	})
+
+	// read persistent data from the disk
+	rf.Persister = persister
+	rf.readPersist()
+
 	rf.setToFollower(rf.CurrentTerm)
 	rf.NextIndex = make([]int, rf.PeersLen)
 	rf.MatchIndex = make([]int, rf.PeersLen)
@@ -724,7 +741,7 @@ func (rf *Raft) runRaft() {
 			select {
 			case <-rf.HbCh:
 			case <-rf.VoteCh:
-			case <-time.After(time.Duration(randomTimeout(700, 1000)) * time.Millisecond):
+			case <-time.After(time.Duration(randomTimeout(700, 10000)) * time.Millisecond):
 				rf.setToCandidate(FOLLOWER)
 			}
 		case CANDIDATE:
@@ -735,7 +752,7 @@ func (rf *Raft) runRaft() {
 			// if it's this case then it's already a follower
 			case <-rf.WinElectCh:
 				rf.setToLeader()
-			case <-time.After(time.Duration(randomTimeout(3000, 4000)) * time.Millisecond):
+			case <-time.After(time.Duration(randomTimeout(30000, 40000)) * time.Millisecond):
 				rf.setToCandidate(CANDIDATE)
 			}
 		case LEADER:
@@ -743,7 +760,7 @@ func (rf *Raft) runRaft() {
 			select {
 			case <-rf.StepDownCh:
 			// same as above
-			case <-time.After(1000 * time.Millisecond):
+			case <-time.After(10000 * time.Millisecond):
 				rf.Mutex.Lock()
 				rf.broadcastAppendEntries()
 				rf.Mutex.Unlock()
