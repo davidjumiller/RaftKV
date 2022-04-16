@@ -413,8 +413,8 @@ func (rf *Raft) readPersist() {
 		dec.Decode(&rf.Logs) != nil {
 		fmt.Println("error decoding log file data")
 	}
-	trace := rf.RTrace.Tracer.CreateTrace()
-	trace.RecordAction(ReadPersist{rf.CurrentTerm, rf.VotedFor, rf.Logs})
+
+	rf.RTrace.RecordAction(ReadPersist{rf.CurrentTerm, rf.VotedFor, rf.Logs})
 }
 
 // broadcast request vote requests to all Peers
@@ -708,6 +708,8 @@ func StartRaft(peers []*util.RPCEndPoint, selfidx int,
 		Index:   0,
 	})
 
+	rf.RTrace = tracer.CreateTrace()
+
 	// read persistent data from the disk
 	rf.Persister = persister
 	rf.readPersist()
@@ -723,8 +725,6 @@ func StartRaft(peers []*util.RPCEndPoint, selfidx int,
 
 	gob.Register(util.GetArgs{})
 	gob.Register(util.PutArgs{})
-
-	rf.RTrace = tracer.CreateTrace()
 
 	rf.RTrace.RecordAction(RaftStart{rf.SelfIndex})
 
