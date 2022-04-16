@@ -177,9 +177,9 @@ func (d *KVS) Put(key string, value string) error {
 
 	// Send put to head via RPC
 	d.lockLog("put", d.PutMutex)
-	putArgs := d.createPutArgs(key, value, localOpId)
+	putArgs, pTrace := d.createPutArgs(key, value, localOpId)
 	d.addOutstandingPut(key, putArgs)
-	d.sendPut(localOpId, putArgs)
+	d.sendPut(pTrace, localOpId, putArgs)
 	d.unlockLog("put", d.PutMutex)
 	return nil
 }
@@ -205,7 +205,7 @@ func (d *KVS) closeRoutines() {
 }
 
 // Creates PutArgs struct for a new Put
-func (d *KVS) createPutArgs(key string, value string, localOpId uint8) *util.PutArgs {
+func (d *KVS) createPutArgs(key string, value string, localOpId uint8) (*util.PutArgs, *tracing.Trace) {
 	// Start Put trace
 	trace := d.Tracer.CreateTrace()
 	trace.RecordAction(PutStart{d.ClientId, localOpId, key, value})
@@ -216,7 +216,7 @@ func (d *KVS) createPutArgs(key string, value string, localOpId uint8) *util.Put
 		Key:      key,
 		Value:    value,
 		PToken:   trace.GenerateToken(),
-	}
+	}, trace
 }
 
 // Creates GetArgs struct for a new Get
@@ -262,7 +262,6 @@ func (d *KVS) sendGet(getArgs *util.GetArgs) {
 }
 
 func (d *KVS) getReceived(trace *tracing.Trace, getResult *util.GetRes) {
-	trace = d.Tracer.ReceiveToken(getResult.GToken)
 	trace.RecordAction(GetResultRecvd{
 		ClientId: getResult.ClientId,
 		OpId:     getResult.OpId,
@@ -298,12 +297,11 @@ func (d *KVS) sendBufferedGets(key string, putOpId uint8) {
 }
 
 // Sends a put to the server and waits for a result
-func (d *KVS) sendPut(localOpId uint8, putArgs *util.PutArgs) {
+func (d *KVS) sendPut(trace *tracing.Trace, localOpId uint8, putArgs *util.PutArgs) {
 	d.lockLog("rtt", d.RTTMutex)
 	d.InProgress[localOpId] = time.Now()
 	d.unlockLog("rtt", d.RTTMutex)
 
-	trace := d.Tracer.ReceiveToken(putArgs.PToken)
 	trace.RecordAction(PutSend{putArgs.ClientId, putArgs.OpId, putArgs.Key, putArgs.Value})
 	putArgs.PToken = trace.GenerateToken()
 
@@ -318,15 +316,14 @@ func (d *KVS) sendPut(localOpId uint8, putArgs *util.PutArgs) {
 	<-time.After(timeout)
 	if putResult.ClientId == putArgs.ClientId && putResult.OpId == putArgs.OpId {
 		// Successful reply
-		d.putReceived(putResult, putArgs)
+		d.putReceived(trace, putResult, putArgs)
 	} else {
 		d.tryNextServer()
-		d.sendPut(localOpId, putArgs)
+		d.sendPut(trace, localOpId, putArgs)
 	}
 }
 
-func (d *KVS) putReceived(putResult *util.PutRes, putArgs *util.PutArgs) {
-	trace := d.Tracer.ReceiveToken(putResult.PToken)
+func (d *KVS) putReceived(trace *tracing.Trace, putResult *util.PutRes, putArgs *util.PutArgs) {
 	trace.RecordAction(PutResultRecvd{
 		ClientId: putResult.ClientId,
 		OpId:     putResult.OpId,
