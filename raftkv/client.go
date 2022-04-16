@@ -111,7 +111,7 @@ func NewKVS() *KVS {
 	}
 }
 
-var timeout = time.Second
+var timeout = 2 * time.Second
 
 // Start Starts the instance of Client to use for connecting to the system.
 // The returned notify-channel channel must have capacity ChCapacity and must be used by kvslib to deliver
@@ -135,7 +135,7 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, localServerIPP
 // this should return an appropriate err value, otherwise err should be set to nil. Note that this call is non-blocking.
 // The returned value must be delivered asynchronously to the client via the notify-channel channel returned in the Start call.
 // The value OpId is used to identify this request and associate the returned value with this request.
-func (d *KVS) Get(tracer *tracing.Tracer, key string) error {
+func (d *KVS) Get(key string) error {
 	d.lockLog("check outstanding puts", d.PutMutex)
 	outstandingPuts, exists := d.Puts[key]
 	numPuts := 0
@@ -148,7 +148,7 @@ func (d *KVS) Get(tracer *tracing.Tracer, key string) error {
 	d.OpId = d.OpId + 1
 	d.unlockLog("op", d.OpMutex)
 
-	getArgs := d.createGetArgs(tracer, key, localOpId)
+	getArgs := d.createGetArgs( key, localOpId)
 	if numPuts > 0 {
 		d.lockLog("last outstanding put", d.PutMutex)
 		elem := outstandingPuts.Back()
@@ -172,14 +172,14 @@ func (d *KVS) Get(tracer *tracing.Tracer, key string) error {
 // this should return an appropriate err value, otherwise err should be set to nil. Note that this call is non-blocking.
 // The value OpId is used to identify this request and associate the returned value with this request.
 // The returned value must be delivered asynchronously via the notify-channel channel returned in the Start call.
-func (d *KVS) Put(tracer *tracing.Tracer, key string, value string) error {
+func (d *KVS) Put(key string, value string) error {
 	localOpId := d.nextOpId()
 
 	// Send put to head via RPC
 	d.lockLog("put", d.PutMutex)
-	putArgs, pTrace := d.createPutArgs(tracer, key, value, localOpId)
+	putArgs := d.createPutArgs(key, value, localOpId)
 	d.addOutstandingPut(key, putArgs)
-	d.sendPut(localOpId, putArgs, pTrace)
+	d.sendPut(localOpId, putArgs)
 	d.unlockLog("put", d.PutMutex)
 	return nil
 }
@@ -205,9 +205,9 @@ func (d *KVS) closeRoutines() {
 }
 
 // Creates PutArgs struct for a new Put
-func (d *KVS) createPutArgs(tracer *tracing.Tracer, key string, value string, localOpId uint8) (*util.PutArgs, *tracing.Trace) {
+func (d *KVS) createPutArgs(key string, value string, localOpId uint8) *util.PutArgs {
 	// Start Put trace
-	trace := tracer.CreateTrace()
+	trace := d.Tracer.CreateTrace()
 	trace.RecordAction(PutStart{d.ClientId, localOpId, key, value})
 
 	return &util.PutArgs{
@@ -215,14 +215,14 @@ func (d *KVS) createPutArgs(tracer *tracing.Tracer, key string, value string, lo
 		OpId:     localOpId,
 		Key:      key,
 		Value:    value,
-		PToken:   nil,
-	}, trace
+		PToken:   trace.GenerateToken(),
+	}
 }
 
 // Creates GetArgs struct for a new Get
-func (d *KVS) createGetArgs(tracer *tracing.Tracer, key string, localOpId uint8) *util.GetArgs {
+func (d *KVS) createGetArgs(key string, localOpId uint8) *util.GetArgs {
 	// Start Get trace
-	trace := tracer.CreateTrace()
+	trace := d.Tracer.CreateTrace()
 	trace.RecordAction(GetStart{d.ClientId, localOpId, key})
 
 	return &util.GetArgs{
@@ -298,13 +298,14 @@ func (d *KVS) sendBufferedGets(key string, putOpId uint8) {
 }
 
 // Sends a put to the server and waits for a result
-func (d *KVS) sendPut(localOpId uint8, putArgs *util.PutArgs, pTrace *tracing.Trace) {
+func (d *KVS) sendPut(localOpId uint8, putArgs *util.PutArgs) {
 	d.lockLog("rtt", d.RTTMutex)
 	d.InProgress[localOpId] = time.Now()
 	d.unlockLog("rtt", d.RTTMutex)
 
-	pTrace.RecordAction(PutSend{putArgs.ClientId, putArgs.OpId, putArgs.Key, putArgs.Value})
-	putArgs.PToken = pTrace.GenerateToken()
+	trace := d.Tracer.ReceiveToken(putArgs.PToken)
+	trace.RecordAction(PutSend{putArgs.ClientId, putArgs.OpId, putArgs.Key, putArgs.Value})
+	putArgs.PToken = trace.GenerateToken()
 
 	putResult := &util.PutRes{
 		ClientId: "",
@@ -317,10 +318,10 @@ func (d *KVS) sendPut(localOpId uint8, putArgs *util.PutArgs, pTrace *tracing.Tr
 	<-time.After(timeout)
 	if putResult.ClientId == putArgs.ClientId && putResult.OpId == putArgs.OpId {
 		// Successful reply
-		d.putReceived(pTrace, putResult, putArgs)
+		d.putReceived(putResult, putArgs)
 	} else {
 		d.tryNextServer()
-		d.sendPut(localOpId, putArgs, pTrace)
+		d.sendPut(localOpId, putArgs)
 	}
 }
 
