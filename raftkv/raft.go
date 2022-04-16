@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math/rand"
 	"net/rpc"
-	"strconv"
 	"sync"
 	"time"
 
@@ -384,9 +383,11 @@ func (rf *Raft) persist() {
 		return
 	}
 	data := w.Bytes()
+	if bytes.Equal(data, rf.Persister.GetRaftState()) {
+		return
+	}
 	rf.Persister.SaveRaftState(data)
-	fileName := "persister_" + strconv.Itoa(rf.SelfIndex) + ".log"
-	rf.Persister.Persist(fileName)
+	rf.Persister.Persist(rf.SelfIndex)
 }
 
 //
@@ -394,8 +395,8 @@ func (rf *Raft) persist() {
 // can be left to m2/m3
 //
 func (rf *Raft) readPersist() {
-	fileName := "persister_" + strconv.Itoa(rf.SelfIndex) + ".log"
-	err := rf.Persister.ReadPersist(fileName)
+
+	err := rf.Persister.ReadPersist(rf.SelfIndex)
 	if err != nil {
 		return
 	}
