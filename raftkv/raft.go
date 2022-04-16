@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/rpc"
+	"strconv"
 	"sync"
 	"time"
 
@@ -203,6 +204,12 @@ type Apply struct {
 	CommandIndex int
 }
 
+type ReadPersist struct {
+	CurrentTerm int
+	VotedFor    int
+	LogsLength  int
+}
+
 //
 // reset the channels, needed when converting server state.
 // lock must be held before calling this.
@@ -219,6 +226,7 @@ func (remoteRaft *RemoteRaft) RequestVote(args *RequestVoteArgs, reply *RequestV
 	rf := remoteRaft.Raft
 	rf.Mutex.Lock()
 	defer rf.Mutex.Unlock()
+	defer rf.persist()
 
 	reply.Term = rf.CurrentTerm
 	reply.VoteGranted = false
@@ -264,6 +272,7 @@ func (remoteRaft *RemoteRaft) AppendEntries(args *AppendEntriesArgs, reply *Appe
 	rf := remoteRaft.Raft
 	rf.Mutex.Lock()
 	defer rf.Mutex.Unlock()
+	defer rf.persist()
 
 	// init reply
 	reply.Term = rf.CurrentTerm
@@ -358,6 +367,7 @@ func (rf *Raft) Execute(command interface{}, reqToken tracing.TracingToken) trac
 	reqTrace := rf.RTrace.Tracer.ReceiveToken(reqToken)
 	reqTrace.RecordAction(ExecuteCommand{rf.CurrentTerm, rf.CurrLeaderIndex, command})
 	rf.Logs = append(rf.Logs, LogEntry{command, rf.CurrentTerm, len(rf.Logs)})
+	rf.persist()
 
 	return reqTrace.GenerateToken()
 }
@@ -375,7 +385,8 @@ func (rf *Raft) persist() {
 	}
 	data := w.Bytes()
 	rf.Persister.SaveRaftState(data)
-	rf.Persister.Persist()
+	fileName := "persister_" + strconv.Itoa(rf.SelfIndex) + ".log"
+	rf.Persister.Persist(fileName)
 }
 
 //
@@ -383,7 +394,11 @@ func (rf *Raft) persist() {
 // can be left to m2/m3
 //
 func (rf *Raft) readPersist() {
-	rf.Persister.ReadPersist()
+	fileName := "persister_" + strconv.Itoa(rf.SelfIndex) + ".log"
+	err := rf.Persister.ReadPersist(fileName)
+	if err != nil {
+		return
+	}
 	data := rf.Persister.GetRaftState()
 
 	// check whether the data is empty
@@ -399,6 +414,8 @@ func (rf *Raft) readPersist() {
 		dec.Decode(&rf.Logs) != nil {
 		fmt.Println("error decoding log file data")
 	}
+
+	rf.RTrace.RecordAction(ReadPersist{rf.CurrentTerm, rf.VotedFor, len(rf.Logs)})
 }
 
 // broadcast request vote requests to all Peers
@@ -451,6 +468,7 @@ func (rf *Raft) sendRequestVote(serverIdx int, args *RequestVoteArgs, reply *Req
 
 	if reply.Term > rf.CurrentTerm {
 		rf.setToFollower(reply.Term)
+		rf.persist()
 		return
 	}
 
@@ -506,6 +524,7 @@ func (rf *Raft) sendAppendEntries(serverIdx int, args *AppendEntriesArgs, reply 
 
 	rf.Mutex.Lock()
 	defer rf.Mutex.Unlock()
+	defer rf.persist()
 
 	trace = trace.Tracer.ReceiveToken(reply.Token)
 	trace.RecordAction(AppendEntriesRes{reply.Term, reply.Success, reply.PrevLogIndex, reply.ConflictTerm, reply.ConflictIndex})
@@ -604,8 +623,7 @@ func (rf *Raft) setToCandidate(identityType IdentityType) {
 	rf.VotedFor = rf.SelfIndex
 	rf.VoteCount = 1
 
-	// TODO: implment persist and broadcast
-	// rf.persist()
+	rf.persist()
 	rf.broadcastRequestVote()
 }
 
@@ -690,6 +708,13 @@ func StartRaft(peers []*util.RPCEndPoint, selfidx int,
 		Term:    0,
 		Index:   0,
 	})
+
+	rf.RTrace = tracer.CreateTrace()
+
+	// read persistent data from the disk
+	rf.Persister = persister
+	rf.readPersist()
+
 	rf.setToFollower(rf.CurrentTerm)
 	rf.NextIndex = make([]int, rf.PeersLen)
 	rf.MatchIndex = make([]int, rf.PeersLen)
@@ -701,8 +726,6 @@ func StartRaft(peers []*util.RPCEndPoint, selfidx int,
 
 	gob.Register(util.GetArgs{})
 	gob.Register(util.PutArgs{})
-
-	rf.RTrace = tracer.CreateTrace()
 
 	rf.RTrace.RecordAction(RaftStart{rf.SelfIndex})
 

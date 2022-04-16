@@ -49,8 +49,8 @@ func (ps *Persister) getKVState() []byte {
 // Persist the state of current persistor
 // called in raft.persist, and should be after calls to save
 // persist should always append on the file of stable storage instead of overwriting it
-func (ps *Persister) Persist() {
-	f, err := os.OpenFile("persister.log", os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
+func (ps *Persister) Persist(fileName string) {
+	f, err := os.OpenFile(fileName, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		fmt.Printf("file open error %v \n", err)
 	}
@@ -64,10 +64,12 @@ func (ps *Persister) Persist() {
 	}
 }
 
-func (ps *Persister) ReadPersist() {
-	data, err := ioutil.ReadFile("persister.log")
+func (ps *Persister) ReadPersist(fileName string) error {
+	data, err := ioutil.ReadFile(fileName)
 	if err != nil {
 		fmt.Printf("reading file error: %v \n", err)
+		return err
 	}
 	ps.SaveRaftState(data)
+	return nil
 }
