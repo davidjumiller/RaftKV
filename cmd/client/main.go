@@ -43,30 +43,28 @@ func main() {
 }
 
 func runTestScript(client *raftkv.KVS, notifCh raftkv.NotifyChannel) {
-	tracer := client.Tracer
-
 	// Put a key-value pair
-	err := client.Put(tracer, "key2", "value2")
+	err := client.Put("key2", "value2")
 	util.CheckErr(err, "Error putting value %v, opId: %v\b", err)
 
 	// Get a key's value
-	err = client.Get(tracer, "key1")
+	err = client.Get("key1")
 	util.CheckErr(err, "Error getting value %v, opId: %v\b", err)
 
 	// Sequence of interleaved gets and puts
-	err = client.Put(tracer, "key1", "test1")
+	err = client.Put("key1", "test1")
 	util.CheckErr(err, "Error putting value %v, opId: %v\b", err)
-	err = client.Get(tracer, "key1")
+	err = client.Get("key1")
 	util.CheckErr(err, "Error getting value %v, opId: %v\b", err)
-	err = client.Put(tracer, "key1", "test2")
+	err = client.Put("key1", "test2")
 	util.CheckErr(err, "Error putting value %v, opId: %v\b", err)
-	err = client.Get(tracer, "key1")
+	err = client.Get("key1")
 	util.CheckErr(err, "Error getting value %v, opId: %v\b", err)
-	err = client.Get(tracer, "key1")
+	err = client.Get("key1")
 	util.CheckErr(err, "Error getting value %v, opId: %v\b", err)
-	err = client.Put(tracer, "key1", "test3")
+	err = client.Put("key1", "test3")
 	util.CheckErr(err, "Error putting value %v, opId: %v\b", err)
-	err = client.Get(tracer, "key1")
+	err = client.Get("key1")
 	util.CheckErr(err, "Error getting value %v, opId: %v\b", err)
 
 	for i := 0; i < 9; i++ {
@@ -106,14 +104,14 @@ func runInteractiveClient(client *raftkv.KVS, notifyCh raftkv.NotifyChannel) {
 		op := args[0]
 		if len(args) == 2 && op == "get" {
 			key := args[1]
-			err := client.Get(client.Tracer, key)
+			err := client.Get(key)
 			util.CheckErr(err, "Error getting value at key %s", key)
 			continue
 		}
 		if len(args) == 3 && op == "put" {
 			key := args[1]
 			value := args[2]
-			err := client.Put(client.Tracer, key, value)
+			err := client.Put(key, value)
 			util.CheckErr(err, "Error putting value %s to key %s", value, key)
 			continue
 		}

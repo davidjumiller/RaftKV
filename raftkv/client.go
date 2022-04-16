@@ -131,14 +131,14 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, localServerIPP
 // this should return an appropriate err value, otherwise err should be set to nil. Note that this call is non-blocking.
 // The returned value must be delivered asynchronously to the client via the notify-channel channel returned in the Start call.
 // The value OpId is used to identify this request and associate the returned value with this request.
-func (d *KVS) Get(tracer *tracing.Tracer, key string) error {
+func (d *KVS) Get(key string) error {
 	outstandingPuts, exists := d.Puts[key]
 	d.lockLog("op", d.OpMutex)
 	localOpId := d.OpId
 	d.OpId = d.OpId + 1
 	d.unlockLog("op", d.OpMutex)
 
-	getArgs := d.createGetArgs(tracer, key, localOpId)
+	getArgs := d.createGetArgs(key, localOpId)
 	if exists && outstandingPuts.Len() > 0 {
 		elem := outstandingPuts.Back() // get latest put opId for this key
 		put := elem.Value.(*util.PutArgs)
@@ -160,11 +160,11 @@ func (d *KVS) Get(tracer *tracing.Tracer, key string) error {
 // this should return an appropriate err value, otherwise err should be set to nil. Note that this call is non-blocking.
 // The value OpId is used to identify this request and associate the returned value with this request.
 // The returned value must be delivered asynchronously via the notify-channel channel returned in the Start call.
-func (d *KVS) Put(tracer *tracing.Tracer, key string, value string) error {
+func (d *KVS) Put(key string, value string) error {
 	localOpId := d.nextOpId()
 
 	// Send put to head via RPC
-	putArgs := d.createPutArgs(tracer, key, value, localOpId)
+	putArgs := d.createPutArgs(key, value, localOpId)
 	d.addOutstandingPut(key, putArgs)
 	go d.sendPut(localOpId, putArgs)
 	return nil
@@ -191,9 +191,9 @@ func (d *KVS) closeRoutines() {
 }
 
 // Creates PutArgs struct for a new Put
-func (d *KVS) createPutArgs(tracer *tracing.Tracer, key string, value string, localOpId uint8) *util.PutArgs {
+func (d *KVS) createPutArgs(key string, value string, localOpId uint8) *util.PutArgs {
 	// Start Put trace
-	trace := tracer.CreateTrace()
+	trace := d.Tracer.CreateTrace()
 	trace.RecordAction(PutStart{d.ClientId, localOpId, key, value})
 
 	return &util.PutArgs{
@@ -206,9 +206,9 @@ func (d *KVS) createPutArgs(tracer *tracing.Tracer, key string, value string, lo
 }
 
 // Creates GetArgs struct for a new Get
-func (d *KVS) createGetArgs(tracer *tracing.Tracer, key string, localOpId uint8) *util.GetArgs {
+func (d *KVS) createGetArgs(key string, localOpId uint8) *util.GetArgs {
 	// Start Get trace
-	trace := tracer.CreateTrace()
+	trace := d.Tracer.CreateTrace()
 	trace.RecordAction(GetStart{d.ClientId, localOpId, key})
 
 	return &util.GetArgs{
