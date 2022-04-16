@@ -148,7 +148,7 @@ func (d *KVS) Get(key string) error {
 	d.OpId = d.OpId + 1
 	d.unlockLog("op", d.OpMutex)
 
-	getArgs := d.createGetArgs( key, localOpId)
+	getArgs := d.createGetArgs(key, localOpId)
 	if numPuts > 0 {
 		d.lockLog("last outstanding put", d.PutMutex)
 		elem := outstandingPuts.Back()
@@ -325,8 +325,8 @@ func (d *KVS) sendPut(localOpId uint8, putArgs *util.PutArgs) {
 	}
 }
 
-func (d *KVS) putReceived(trace *tracing.Trace, putResult *util.PutRes, putArgs *util.PutArgs) {
-	trace = d.Tracer.ReceiveToken(putResult.PToken)
+func (d *KVS) putReceived(putResult *util.PutRes, putArgs *util.PutArgs) {
+	trace := d.Tracer.ReceiveToken(putResult.PToken)
 	trace.RecordAction(PutResultRecvd{
 		ClientId: putResult.ClientId,
 		OpId:     putResult.OpId,
