@@ -480,10 +480,6 @@ func (rf *Raft) broadcastAppendEntries() {
 	if rf.Identity != LEADER {
 		return
 	}
-	args := &AppendEntriesArgs{}
-	args.LeaderId = rf.SelfIndex
-	args.LeaderCommit = rf.CommitIndex
-	args.Term = rf.CurrentTerm
 
 	reply := &AppendEntriesReply{}
 
@@ -491,6 +487,10 @@ func (rf *Raft) broadcastAppendEntries() {
 		if i == rf.SelfIndex {
 			continue
 		}
+		args := &AppendEntriesArgs{}
+		args.LeaderId = rf.SelfIndex
+		args.LeaderCommit = rf.CommitIndex
+		args.Term = rf.CurrentTerm
 
 		args.PrevLogIndex = rf.NextIndex[i] - 1
 		args.PrevLogTerm = rf.Logs[args.PrevLogIndex].Term
@@ -579,7 +579,7 @@ func (rf *Raft) Commit(trace *tracing.Trace) {
 			}
 		}
 
-		if sentCount >= len(rf.Peers)+1 {
+		if sentCount > len(rf.Peers)/2 {
 			rf.CommitIndex = i
 			trace.RecordAction(Commit{rf.SelfIndex, rf.CurrentTerm, i})
 			go rf.apply()
@@ -714,6 +714,9 @@ func StartRaft(peers []*util.RPCEndPoint, selfidx int,
 
 	rand.Seed(time.Now().UnixNano())
 
+	gob.Register(util.GetArgs{})
+	gob.Register(util.PutArgs{})
+
 	rf.RTrace = tracer.CreateTrace()
 
 	rf.RTrace.RecordAction(RaftStart{rf.SelfIndex})
@@ -751,7 +754,7 @@ func (rf *Raft) runRaft() {
 			// if it's this case then it's already a follower
 			case <-rf.WinElectCh:
 				rf.setToLeader()
-			case <-time.After(time.Duration(randomTimeout(30000, 40000)) * time.Millisecond):
+			case <-time.After(time.Duration(randomTimeout(700, 1000)) * time.Millisecond):
 				rf.setToCandidate(CANDIDATE)
 			}
 		case LEADER:
@@ -759,7 +762,7 @@ func (rf *Raft) runRaft() {
 			select {
 			case <-rf.StepDownCh:
 			// same as above
-			case <-time.After(10000 * time.Millisecond):
+			case <-time.After(120 * time.Millisecond):
 				rf.Mutex.Lock()
 				rf.broadcastAppendEntries()
 				rf.Mutex.Unlock()

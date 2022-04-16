@@ -134,6 +134,9 @@ func (kvs *KVServer) Start(serverIdx int, serverAddr string, serverList []string
 	}
 	trace.RecordAction(ServerListening{serverIdx})
 
+	// Maintain local store with updates from Raft
+	go kvs.updateStore()
+
 	for {
 		// Serve indefinitely
 	}
@@ -158,10 +161,11 @@ func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 	})
 
 	if kvs.ServerIdx == kvs.LastLdrID {
-		err := kvs.Raft.Execute(getArgs.Key) // Arguments to be specified later
+		err = kvs.Raft.Execute(*getArgs)
 		if err != nil {
 			return err
 		}
+		// Return value stored at key
 		val := kvs.Store[getArgs.Key]
 		trace.RecordAction(GetResult{
 			ClientId: getArgs.ClientId,
@@ -179,7 +183,7 @@ func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 			Key:      getArgs.Key,
 		})
 		getArgs.GToken = trace.GenerateToken()
-		err := kvs.Client.Call("KVServer.Get", getArgs, getRes)
+		err = kvs.Client.Call("KVServer.Get", getArgs, getRes)
 		if err != nil {
 			return err
 		}
@@ -214,11 +218,10 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 	})
 
 	if kvs.ServerIdx == kvs.LastLdrID {
-		err := kvs.Raft.Execute(putArgs.Key) // Arguments to be specified later
+		err = kvs.Raft.Execute(*putArgs)
 		if err != nil {
 			return err
 		}
-		kvs.Store[putArgs.Key] = putArgs.Value // Database updated from raft side via apply in the future
 		trace.RecordAction(PutResult{
 			ClientId: putArgs.ClientId,
 			Key:      putArgs.Key,
@@ -236,7 +239,7 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 			Value:    putArgs.Value,
 		})
 		putArgs.PToken = trace.GenerateToken()
-		err := kvs.Client.Call("KVServer.Put", putArgs, putRes)
+		err = kvs.Client.Call("KVServer.Put", putArgs, putRes)
 		if err != nil {
 			return err
 		}
@@ -250,6 +253,18 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 	}
 
 	return nil
+}
+
+// Update store with state changes notified by Raft via ApplyCh
+func (kvs *KVServer) updateStore() {
+	for {
+		applyMsg := <-kvs.Raft.ApplyCh
+		putArgs, ok := applyMsg.Command.(util.PutArgs)
+		if ok {
+			// Command is Put; update store
+			kvs.Store[putArgs.Key] = putArgs.Value
+		}
+	}
 }
 
 func (kvs *KVServer) checkLeader(raftState RaftState) error {
