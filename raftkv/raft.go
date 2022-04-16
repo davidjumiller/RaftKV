@@ -351,14 +351,15 @@ func (rf *Raft) GetState() RaftState {
 }
 
 // Execute a command, called when the server gets a request
-func (rf *Raft) Execute(command interface{}) error {
+func (rf *Raft) Execute(command interface{}, reqToken tracing.TracingToken) tracing.TracingToken {
 	rf.Mutex.Lock()
 	defer rf.Mutex.Unlock()
 
-	rf.RTrace.RecordAction(ExecuteCommand{rf.CurrentTerm, rf.CurrLeaderIndex, command})
+	reqTrace := rf.RTrace.Tracer.ReceiveToken(reqToken)
+	reqTrace.RecordAction(ExecuteCommand{rf.CurrentTerm, rf.CurrLeaderIndex, command})
 	rf.Logs = append(rf.Logs, LogEntry{command, rf.CurrentTerm, len(rf.Logs)})
 
-	return nil
+	return reqTrace.GenerateToken()
 }
 
 //
