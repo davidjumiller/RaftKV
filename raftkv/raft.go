@@ -204,6 +204,12 @@ type Apply struct {
 	CommandIndex int
 }
 
+type ReadPersist struct {
+	CurrentTerm int
+	VotedFor    int
+	Logs        []LogEntry
+}
+
 //
 // reset the channels, needed when converting server state.
 // lock must be held before calling this.
@@ -407,7 +413,8 @@ func (rf *Raft) readPersist() {
 		dec.Decode(&rf.Logs) != nil {
 		fmt.Println("error decoding log file data")
 	}
-	fmt.Printf("readPersistState: %v, %v, %v \n", rf.CurrentTerm, rf.VotedFor, rf.Logs)
+	trace := rf.RTrace.Tracer.CreateTrace()
+	trace.RecordAction(ReadPersist{rf.CurrentTerm, rf.VotedFor, rf.Logs})
 }
 
 // broadcast request vote requests to all Peers
@@ -743,7 +750,7 @@ func (rf *Raft) runRaft() {
 			select {
 			case <-rf.HbCh:
 			case <-rf.VoteCh:
-			case <-time.After(time.Duration(randomTimeout(700, 10000)) * time.Millisecond):
+			case <-time.After(time.Duration(randomTimeout(700, 1000)) * time.Millisecond):
 				rf.setToCandidate(FOLLOWER)
 			}
 		case CANDIDATE:
