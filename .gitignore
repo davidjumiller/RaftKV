@@ -5,6 +5,9 @@ trace_output.log
 # Executables
 bin/
 
+# Persisted logs
+persister_*.log
+
 # IDE
 .idea/
 
