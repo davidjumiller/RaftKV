@@ -20,6 +20,11 @@ type ClientConfig struct {
 	TracingIdentity   string
 }
 
+var (
+	resetColour   = "\033[0m"  // default text colour
+	successColour = "\033[32m" // green text
+)
+
 func main() {
 	var config ClientConfig
 	err := util.ReadJSONConfig("config/client_config.json", &config)
@@ -69,7 +74,7 @@ func runTestScript(client *raftkv.KVS, notifCh raftkv.NotifyChannel) {
 
 	for i := 0; i < 9; i++ {
 		result := <-notifCh
-		log.Println(result)
+		log.Printf("%s%v%s\n", successColour, result, resetColour)
 	}
 	client.Stop()
 }
@@ -83,10 +88,9 @@ func runInteractiveClient(client *raftkv.KVS, notifyCh raftkv.NotifyChannel) {
 	}()
 
 	go func() {
-		// Print results as they return
-		for {
-			result := <-notifyCh
-			log.Println(result)
+		// Print results as they return from KVS
+		for result := range notifyCh {
+			log.Printf("%s%v%s\n", successColour, result, resetColour)
 		}
 	}()
 
