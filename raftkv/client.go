@@ -361,15 +361,12 @@ func (d *KVS) removeOutstandingPut(putArgs *util.PutArgs) {
 
 // Adds a new outstanding put to a KVS
 func (d *KVS) addOutstandingPut(key string, putArgs *util.PutArgs) {
-	d.lockLog("add outstanding put", d.PutMutex)
 	_, exists := d.Puts[key]
 	if !exists {
 		d.Puts[key] = new(list.List)
 		d.BufferedGets[key] = new(list.List)
 	}
 	d.Puts[key].PushBack(putArgs)
-	d.unlockLog("add outstanding put", d.PutMutex)
-
 }
 
 // Updates a KVS's estimated RTT based on an operation's RTT
