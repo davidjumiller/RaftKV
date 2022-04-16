@@ -176,9 +176,11 @@ func (d *KVS) Put(tracer *tracing.Tracer, key string, value string) error {
 	localOpId := d.nextOpId()
 
 	// Send put to head via RPC
+	d.lockLog("put", d.PutMutex)
 	putArgs, pTrace := d.createPutArgs(tracer, key, value, localOpId)
 	d.addOutstandingPut(key, putArgs)
-	go d.sendPut(localOpId, putArgs, pTrace)
+	d.sendPut(localOpId, putArgs, pTrace)
+	d.unlockLog("put", d.PutMutex)
 	return nil
 }
 
@@ -278,6 +280,7 @@ func (d *KVS) getReceived(trace *tracing.Trace, getResult *util.GetRes) {
 
 // Sends the buffered Gets to the server matching the given key and opId
 func (d *KVS) sendBufferedGets(key string, putOpId uint8) {
+	d.lockLog("send buffered get", d.GetMutex)
 	bufferedGets := d.BufferedGets[key]
 	elem := bufferedGets.Front()
 	for elem != nil {
@@ -285,14 +288,13 @@ func (d *KVS) sendBufferedGets(key string, putOpId uint8) {
 		if bufferedGet.PutOpId == putOpId {
 			getToSend := elem
 			elem = elem.Next()
-			d.lockLog("send buffered get", d.GetMutex)
 			bufferedGets.Remove(getToSend)
-			d.unlockLog("send buffered get", d.GetMutex)
 			d.sendGet(bufferedGet.Args)
 		} else {
 			elem = elem.Next()
 		}
 	}
+	d.unlockLog("send buffered get", d.GetMutex)
 }
 
 // Sends a put to the server and waits for a result
@@ -342,7 +344,6 @@ func (d *KVS) putReceived(trace *tracing.Trace, putResult *util.PutRes, putArgs 
 
 // Removes the put matching putArgs from outstanding puts
 func (d *KVS) removeOutstandingPut(putArgs *util.PutArgs) {
-	d.lockLog("remove outstanding put", d.PutMutex)
 	outstandingPuts := d.Puts[putArgs.Key]
 	elem := outstandingPuts.Front()
 	for elem != nil {
@@ -356,7 +357,6 @@ func (d *KVS) removeOutstandingPut(putArgs *util.PutArgs) {
 			elem = elem.Next()
 		}
 	}
-	d.unlockLog("remove outstanding put", d.PutMutex)
 }
 
 // Adds a new outstanding put to a KVS
