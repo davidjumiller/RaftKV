@@ -615,7 +615,6 @@ func (rf *Raft) setToCandidate(identityType IdentityType) {
 	rf.VotedFor = rf.SelfIndex
 	rf.VoteCount = 1
 
-	// TODO: implement persist and broadcast
 	rf.persist()
 	rf.broadcastRequestVote()
 }
