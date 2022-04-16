@@ -207,7 +207,7 @@ type Apply struct {
 type ReadPersist struct {
 	CurrentTerm int
 	VotedFor    int
-	Logs        []LogEntry
+	LogsLength  int
 }
 
 //
@@ -414,7 +414,7 @@ func (rf *Raft) readPersist() {
 		fmt.Println("error decoding log file data")
 	}
 
-	rf.RTrace.RecordAction(ReadPersist{rf.CurrentTerm, rf.VotedFor, rf.Logs})
+	rf.RTrace.RecordAction(ReadPersist{rf.CurrentTerm, rf.VotedFor, len(rf.Logs)})
 }
 
 // broadcast request vote requests to all Peers
