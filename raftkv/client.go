@@ -3,8 +3,8 @@ package raftkv
 import (
 	"container/list"
 	"cs.ubc.ca/cpsc416/p1/util"
+	"fmt"
 	"github.com/DistributedClocks/tracing"
-	"net"
 	"net/rpc"
 	"sync"
 	"time"
@@ -25,7 +25,13 @@ type PutStart struct {
 	Value    string
 }
 
-type PutSend PutStart
+type PutSend struct {
+	ClientId string
+	ServerId int
+	OpId     uint8
+	Key      string
+	Value    string
+}
 
 type PutResultRecvd struct {
 	ClientId string
@@ -40,7 +46,12 @@ type GetStart struct {
 	Key      string
 }
 
-type GetSend GetStart
+type GetSend struct {
+	ClientId string
+	ServerId int
+	OpId     uint8
+	Key      string
+}
 
 type BufferedGet struct {
 	Args    *util.GetArgs
@@ -56,6 +67,7 @@ type GetResultRecvd struct {
 
 type NewServerConnection struct {
 	ClientId   string
+	ServerId   int
 	ServerAddr string
 }
 
@@ -72,42 +84,40 @@ type ResultStruct struct {
 type KVS struct {
 	NotifyCh NotifyChannel
 	// Add more KVS instance state here.
-	KTrace          *tracing.Trace
-	ClientId        string
-	LocalServerAddr string
-	RemoteAddrIndex int // Index of server in ServerList we are connected to
-	ServerList      []string
-	RTT             time.Duration
-	Tracer          *tracing.Tracer
-	InProgress      map[uint8]time.Time // Map representing sent requests that haven't been responded to
-	PutMutex        *sync.Mutex
-	GetMutex        *sync.Mutex
-	RTTMutex        *sync.Mutex
-	OpMutex         *sync.Mutex
-	IndexMutex      *sync.Mutex
-	Puts            map[string]*list.List // list of outstanding put ids for a key
-	BufferedGets    map[string]*list.List
-	OpId            uint8
-	AliveCh         chan int
-	Conn            *net.TCPConn
-	Client          *rpc.Client
+	KTrace       *tracing.Trace
+	ClientId     string
+	ServerId     int // Index of server in ServerList we are connected to
+	ServerList   []string
+	RTT          time.Duration
+	Tracer       *tracing.Tracer
+	InProgress   map[uint8]time.Time // Map representing sent requests that haven't been responded to
+	PutMutex     *sync.Mutex
+	GetMutex     *sync.Mutex
+	RTTMutex     *sync.Mutex
+	OpMutex      *sync.Mutex
+	IndexMutex   *sync.Mutex
+	Puts         map[string]*list.List // list of outstanding put ids for a key
+	BufferedGets map[string]*list.List
+	OpId         uint8
+	AliveCh      chan int
+	Client       *rpc.Client
 }
 
 func NewKVS() *KVS {
 	return &KVS{
-		NotifyCh:        nil,
-		RemoteAddrIndex: 0,
-		InProgress:      make(map[uint8]time.Time),
-		PutMutex:        new(sync.Mutex),
-		GetMutex:        new(sync.Mutex),
-		RTTMutex:        new(sync.Mutex),
-		OpMutex:         new(sync.Mutex),
-		IndexMutex:      new(sync.Mutex),
-		Puts:            make(map[string]*list.List),
-		BufferedGets:    make(map[string]*list.List),
-		OpId:            1,
-		RTT:             3 * time.Second,
-		AliveCh:         make(chan int),
+		NotifyCh:     nil,
+		ServerId:     0,
+		InProgress:   make(map[uint8]time.Time),
+		PutMutex:     new(sync.Mutex),
+		GetMutex:     new(sync.Mutex),
+		RTTMutex:     new(sync.Mutex),
+		OpMutex:      new(sync.Mutex),
+		IndexMutex:   new(sync.Mutex),
+		Puts:         make(map[string]*list.List),
+		BufferedGets: make(map[string]*list.List),
+		OpId:         1,
+		RTT:          3 * time.Second,
+		AliveCh:      make(chan int),
 	}
 }
 
@@ -122,7 +132,6 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, localServerIPP
 	d.NotifyCh = make(NotifyChannel, chCapacity)
 	d.KTrace = localTracer.CreateTrace()
 	d.ClientId = clientId
-	d.LocalServerAddr = localServerIPPort
 	d.Tracer = localTracer
 	d.ServerList = serverIPPortList
 	d.connectToServer()
@@ -240,7 +249,7 @@ func (d *KVS) sendGet(getArgs *util.GetArgs) {
 	d.unlockLog("rtt", d.RTTMutex)
 
 	trace := d.Tracer.ReceiveToken(getArgs.GToken)
-	trace.RecordAction(GetSend{getArgs.ClientId, getArgs.OpId, getArgs.Key})
+	trace.RecordAction(GetSend{getArgs.ClientId, d.ServerId, getArgs.OpId, getArgs.Key})
 	getArgs.GToken = trace.GenerateToken()
 
 	getResult := &util.GetRes{
@@ -256,6 +265,7 @@ func (d *KVS) sendGet(getArgs *util.GetArgs) {
 		// Successful reply
 		d.getReceived(trace, getResult)
 	} else {
+		// Timeout -- assume server has failed and try a different one
 		d.tryNextServer()
 		d.sendGet(getArgs)
 	}
@@ -304,7 +314,7 @@ func (d *KVS) sendPut(localOpId uint8, putArgs *util.PutArgs) {
 	d.unlockLog("rtt", d.RTTMutex)
 
 	trace := d.Tracer.ReceiveToken(putArgs.PToken)
-	trace.RecordAction(PutSend{putArgs.ClientId, putArgs.OpId, putArgs.Key, putArgs.Value})
+	trace.RecordAction(PutSend{putArgs.ClientId, d.ServerId, putArgs.OpId, putArgs.Key, putArgs.Value})
 	putArgs.PToken = trace.GenerateToken()
 
 	putResult := &util.PutRes{
@@ -320,6 +330,7 @@ func (d *KVS) sendPut(localOpId uint8, putArgs *util.PutArgs) {
 		// Successful reply
 		d.putReceived(putResult, putArgs)
 	} else {
+		// Timeout -- assume server has failed and try a different one
 		d.tryNextServer()
 		d.sendPut(localOpId, putArgs)
 	}
@@ -404,33 +415,30 @@ func (d *KVS) nextOpId() uint8 {
 
 func (d *KVS) connectToServer() {
 	d.lockLog("next server", d.IndexMutex)
-	serverAddr := d.ServerList[d.RemoteAddrIndex]
+	serverAddr := d.ServerList[d.ServerId]
 	if d.Client != nil {
 		d.Client.Close()
 	}
-	if d.Conn != nil {
-		d.Conn.Close()
-	}
 	var err error
-	d.Conn, d.Client, err = util.TryMakeClient(d.LocalServerAddr, serverAddr)
+	d.Client, err = rpc.Dial("tcp", serverAddr)
 	d.unlockLog("next server", d.IndexMutex)
 	if err != nil {
 		// Keep trying next server indefinitely
-		util.CheckErr(err, "hello???", err)
+		fmt.Println("Could not connect to", serverAddr)
 		d.tryNextServer()
 	} else {
 		trace := d.Tracer.CreateTrace()
-		trace.RecordAction(NewServerConnection{d.ClientId, serverAddr})
+		trace.RecordAction(NewServerConnection{d.ClientId, d.ServerId, serverAddr})
 	}
 }
 
 // attempts to connect to next server on the list
 func (d *KVS) tryNextServer() {
-	//d.lockLog("next server index", d.IndexMutex)
-	//d.RemoteAddrIndex += 1
-	//if d.RemoteAddrIndex >= len(d.ServerList) {
-	//	d.RemoteAddrIndex = 0
-	//}
-	//d.unlockLog("next server index", d.IndexMutex)
-	//d.connectToServer()
+	d.lockLog("next server index", d.IndexMutex)
+	d.ServerId += 1
+	if d.ServerId >= len(d.ServerList) {
+		d.ServerId = 0
+	}
+	d.unlockLog("next server index", d.IndexMutex)
+	d.connectToServer()
 }
