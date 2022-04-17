@@ -128,7 +128,7 @@ var timeout = 2 * time.Second
 // all get/put output notifications. ChCapacity determines the concurrency
 // factor at the client: the client will never have more than ChCapacity number of operations outstanding (pending concurrently) at any one time.
 // If there is an issue with connecting to the system, this should return an appropriate err value, otherwise err should be set to nil.
-func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, localServerIPPort string, serverIPPortList []string, chCapacity int) (NotifyChannel, error) {
+func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, serverIPPortList []string, chCapacity int) (NotifyChannel, error) {
 	d.NotifyCh = make(NotifyChannel, chCapacity)
 	d.KTrace = localTracer.CreateTrace()
 	d.ClientId = clientId
