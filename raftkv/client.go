@@ -217,7 +217,7 @@ func (d *KVS) createPutArgs(key string, value string, localOpId uint8) (*util.Pu
 		OpId:     localOpId,
 		Key:      key,
 		Value:    value,
-		PToken:   trace.GenerateToken(),
+		PToken:   nil,
 	}, trace
 }
 
@@ -231,7 +231,7 @@ func (d *KVS) createGetArgs(key string, localOpId uint8) (*util.GetArgs, *tracin
 			ClientId: d.ClientId,
 			OpId:     localOpId,
 			Key:      key,
-			GToken:   trace.GenerateToken(),
+			GToken:   nil,
 		},
 		trace
 }
