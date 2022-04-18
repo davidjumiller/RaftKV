@@ -1,12 +1,13 @@
 package raftkv
 
 import (
-	"cs.ubc.ca/cpsc416/p1/util"
 	"fmt"
-	"github.com/DistributedClocks/tracing"
 	"net"
 	"net/rpc"
 	"sync"
+
+	"cs.ubc.ca/cpsc416/p1/util"
+	"github.com/DistributedClocks/tracing"
 )
 
 type PutRecvd struct {

@@ -206,7 +206,15 @@ type Apply struct {
 type ReadPersist struct {
 	CurrentTerm int
 	VotedFor    int
-	LogsLength  int
+	// LogsLength  int
+	Logs []LogEntry
+}
+
+// struct for persisting encode/decode
+type PersistData struct {
+	CurrentTerm int
+	VotedFor    int
+	Logs        []LogEntry
 }
 
 //
@@ -378,8 +386,10 @@ func (rf *Raft) Execute(command interface{}, reqToken tracing.TracingToken) trac
 func (rf *Raft) persist() {
 	w := new(bytes.Buffer)
 	e := gob.NewEncoder(w)
-	if e.Encode(rf.CurrentTerm) != nil || e.Encode(rf.VotedFor) != nil || e.Encode(rf.Logs) != nil {
-		fmt.Println("Error in persist encoding")
+	pd := PersistData{rf.CurrentTerm, rf.VotedFor, rf.Logs}
+	if err := e.Encode(pd); err != nil {
+		fmt.Printf("Error in persist encoding\n\n\n")
+		fmt.Printf("%v \n\n\n", err)
 		return
 	}
 	data := w.Bytes()
@@ -388,6 +398,7 @@ func (rf *Raft) persist() {
 	}
 	rf.Persister.SaveRaftState(data)
 	rf.Persister.Persist(rf.SelfIndex)
+	rf.RTrace.RecordAction(pd)
 }
 
 //
@@ -407,16 +418,24 @@ func (rf *Raft) readPersist() {
 		return
 	}
 
+	gob.Register(util.PutArgs{})
+	gob.Register(util.GetArgs{})
+
 	buf := bytes.NewBuffer(data)
 	dec := gob.NewDecoder(buf)
 
-	if dec.Decode(&rf.CurrentTerm) != nil ||
-		dec.Decode(&rf.VotedFor) != nil ||
-		dec.Decode(&rf.Logs) != nil {
-		fmt.Println("error decoding log file data")
+	var d PersistData
+	if err := dec.Decode(&d); err != nil {
+		fmt.Printf("error decoding log file data \n\n")
+		fmt.Printf("%v \n\n", err)
+		return
 	}
 
-	rf.RTrace.RecordAction(ReadPersist{rf.CurrentTerm, rf.VotedFor, len(rf.Logs)})
+	rf.CurrentTerm = d.CurrentTerm
+	rf.VotedFor = d.VotedFor
+	rf.Logs = d.Logs
+
+	rf.RTrace.RecordAction(ReadPersist{rf.CurrentTerm, rf.VotedFor, rf.Logs})
 }
 
 // broadcast request vote requests to all Peers
@@ -727,6 +746,7 @@ func StartRaft(peers []*util.RPCEndPoint, selfidx int,
 
 	gob.Register(util.GetArgs{})
 	gob.Register(util.PutArgs{})
+	gob.Register(LogEntry{})
 
 	rf.RTrace.RecordAction(RaftStart{rf.SelfIndex})
 
@@ -771,7 +791,7 @@ func (rf *Raft) runRaft() {
 			select {
 			case <-rf.StepDownCh:
 			// same as above
-			case <-time.After(120 * time.Millisecond):
+			case <-time.After(600 * time.Millisecond):
 				rf.Mutex.Lock()
 				rf.broadcastAppendEntries()
 				rf.Mutex.Unlock()
