@@ -1,12 +1,13 @@
 package raftkv
 
 import (
-	"cs.ubc.ca/cpsc416/p1/util"
 	"fmt"
-	"github.com/DistributedClocks/tracing"
 	"net"
 	"net/rpc"
 	"sync"
+
+	"cs.ubc.ca/cpsc416/p1/util"
+	"github.com/DistributedClocks/tracing"
 )
 
 type PutRecvd struct {
@@ -162,8 +163,8 @@ func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 
 	if kvs.ServerIdx == kvs.LastLdrID {
 		// Execute (log) Get request on Raft
-		token := kvs.Raft.Execute(*getArgs, trace.GenerateToken())
-		trace = kvs.Tracer.ReceiveToken(token)
+		// token := kvs.Raft.Execute(*getArgs, trace.GenerateToken())
+		// trace = kvs.Tracer.ReceiveToken(token)
 
 		// Return value stored at key
 		val := kvs.Store[getArgs.Key]
@@ -219,7 +220,7 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 
 	if kvs.ServerIdx == kvs.LastLdrID {
 		// Execute (log) Put request on Raft
-		token := kvs.Raft.Execute(*putArgs, trace.GenerateToken())
+		token := kvs.Raft.Execute(util.RaftPutReq{putArgs.ClientId, putArgs.Key, putArgs.Value, putArgs.OpId}, trace.GenerateToken())
 		trace = kvs.Tracer.ReceiveToken(token)
 
 		trace.RecordAction(PutResult{
@@ -259,7 +260,7 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 func (kvs *KVServer) updateStore() {
 	for {
 		applyMsg := <-kvs.Raft.ApplyCh
-		putArgs, ok := applyMsg.Command.(util.PutArgs)
+		putArgs, ok := applyMsg.Command.(util.RaftPutReq)
 		if ok {
 			// Command is Put; update store
 			kvs.Store[putArgs.Key] = putArgs.Value
