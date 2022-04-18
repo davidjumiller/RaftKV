@@ -31,6 +31,13 @@ type PutArgs struct {
 	PToken   tracing.TracingToken
 }
 
+type RaftPutReq struct {
+	ClientId string
+	Key      string
+	Value    string
+	OpId     uint8
+}
+
 type PutRes struct {
 	ClientId string
 	OpId     uint8
