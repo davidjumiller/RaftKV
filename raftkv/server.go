@@ -11,47 +11,57 @@ import (
 
 type PutRecvd struct {
 	ClientId string
+	OpId     uint8
 	Key      string
 	Value    string
 }
 
 type PutFwd struct {
 	ClientId string
-	Key      string
-	Value    string
-}
-
-type PutFwdRecvd struct {
-	ClientId string
+	OpId     uint8
 	Key      string
 	Value    string
 }
 
 type PutResult struct {
 	ClientId string
+	OpId     uint8
 	Key      string
 	Value    string
 }
 
-type PutResultFwd PutResult
+type PutResultFwd struct {
+	ClientId string
+	OpId     uint8
+	Key      string
+	Value    string
+}
 
 type GetRecvd struct {
 	ClientId string
+	OpId     uint8
 	Key      string
 }
 
 type GetFwd struct {
 	ClientId string
+	OpId     uint8
 	Key      string
 }
 
 type GetResult struct {
 	ClientId string
+	OpId     uint8
 	Key      string
 	Value    string
 }
 
-type GetResultFwd GetResult
+type GetResultFwd struct {
+	ClientId string
+	OpId     uint8
+	Key      string
+	Value    string
+}
 
 type ServerStart struct {
 	ServerIdx int
@@ -153,6 +163,7 @@ func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 	trace := kvs.Tracer.ReceiveToken(getArgs.GToken)
 	trace.RecordAction(GetRecvd{
 		ClientId: getArgs.ClientId,
+		OpId:     getArgs.OpId,
 		Key:      getArgs.Key,
 	})
 
@@ -168,22 +179,24 @@ func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 		token := kvs.Raft.Execute(*getArgs, trace.GenerateToken())
 		trace = kvs.Tracer.ReceiveToken(token)
 
-		// Return Get response to caller with value stored at key
-		val := kvs.Store[getArgs.Key]
+		// Return Get response to caller
+		value := kvs.Store[getArgs.Key]
 		trace.RecordAction(GetResult{
 			ClientId: getArgs.ClientId,
+			OpId:     getArgs.OpId,
 			Key:      getArgs.Key,
-			Value:    val,
+			Value:    value,
 		})
 		getRes.ClientId = getArgs.ClientId
 		getRes.OpId = getArgs.OpId
 		getRes.Key = getArgs.Key
-		getRes.Value = val
+		getRes.Value = value
 		getRes.GToken = trace.GenerateToken()
 	} else {
 		// Forward Get request to leader
 		trace.RecordAction(GetFwd{
 			ClientId: getArgs.ClientId,
+			OpId:     getArgs.OpId,
 			Key:      getArgs.Key,
 		})
 		getArgs.GToken = trace.GenerateToken()
@@ -196,6 +209,7 @@ func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 		trace = kvs.Tracer.ReceiveToken(getRes.GToken)
 		trace.RecordAction(GetResultFwd{
 			ClientId: getRes.ClientId,
+			OpId:     getArgs.OpId,
 			Key:      getRes.Key,
 			Value:    getRes.Value,
 		})
@@ -211,6 +225,7 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 	trace := kvs.Tracer.ReceiveToken(putArgs.PToken)
 	trace.RecordAction(PutRecvd{
 		ClientId: putArgs.ClientId,
+		OpId:     putArgs.OpId,
 		Key:      putArgs.Key,
 		Value:    putArgs.Value,
 	})
@@ -226,27 +241,30 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 		// Execute (log) Put request on Raft
 		kvs.addOutstandingPut(putArgs)
 		token := kvs.Raft.Execute(*putArgs, trace.GenerateToken())
+		trace = kvs.Tracer.ReceiveToken(token)
 
 		// Wait for Raft to finish logging Put
 		for kvs.OutstandingPuts[putArgs.ClientId].Has(putArgs.OpId) {
 		}
 
 		// Return Put response to caller
-		trace = kvs.Tracer.ReceiveToken(token)
+		value := kvs.Store[putArgs.Key]
 		trace.RecordAction(PutResult{
 			ClientId: putArgs.ClientId,
+			OpId:     putArgs.OpId,
 			Key:      putArgs.Key,
-			Value:    putArgs.Value,
+			Value:    value,
 		})
 		putRes.ClientId = putArgs.ClientId
 		putRes.OpId = putArgs.OpId
 		putRes.Key = putArgs.Key
-		putRes.Value = putArgs.Value
+		putRes.Value = value
 		putRes.PToken = trace.GenerateToken()
 	} else {
 		// Forward Put request to leader
 		trace.RecordAction(PutFwd{
 			ClientId: putArgs.ClientId,
+			OpId:     putArgs.OpId,
 			Key:      putArgs.Key,
 			Value:    putArgs.Value,
 		})
@@ -260,6 +278,7 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 		trace = kvs.Tracer.ReceiveToken(putRes.PToken)
 		trace.RecordAction(PutResultFwd{
 			ClientId: putRes.ClientId,
+			OpId:     putRes.OpId,
 			Key:      putRes.Key,
 			Value:    putRes.Value,
 		})
