@@ -176,10 +176,6 @@ func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 	}
 
 	if kvs.ServerIdx == kvs.LastLdrID {
-		// Execute (log) Get request on Raft
-		// token := kvs.Raft.Execute(*getArgs, trace.GenerateToken())
-		// trace = kvs.Tracer.ReceiveToken(token)
-
 		// Return Get response to caller
 		value := kvs.Store[getArgs.Key]
 		trace.RecordAction(GetResult{
