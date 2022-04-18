@@ -45,7 +45,7 @@ func main() {
 	})
 
 	client := raftkv.NewKVS()
-	notifCh, err := client.Start(tracer, config.ClientID, config.LocalServerIPPort, config.ServerIPPortList, config.ChCapacity)
+	notifCh, err := client.Start(tracer, config.ClientID, config.ServerIPPortList, config.ChCapacity)
 	util.CheckErr(err, "Error reading client config: %v\n", err)
 
 	if len(os.Args) == 3 && os.Args[2] == "-i" {

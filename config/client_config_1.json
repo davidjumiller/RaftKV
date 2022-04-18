@@ -1,6 +1,5 @@
 {
   "ClientID": "client1",
-  "LocalServerIPPort": "0.0.0.0:12350",
   "ServerIPPortList": [
     "0.0.0.0:23450",
     "0.0.0.0:23460",
