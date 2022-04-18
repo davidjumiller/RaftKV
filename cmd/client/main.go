@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"cs.ubc.ca/cpsc416/p1/raftkv"
 	"cs.ubc.ca/cpsc416/p1/util"
+	"fmt"
 	"github.com/DistributedClocks/tracing"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -26,9 +28,15 @@ var (
 )
 
 func main() {
+	// Get server index from command line arg
+	clientIdx, err := strconv.Atoi(os.Args[1])
+	util.CheckErr(err, "failed to parse client index")
+
+	filename := fmt.Sprintf("./config/client_config_%d.json", clientIdx)
+	fmt.Println("Client config file:", filename)
 	var config ClientConfig
-	err := util.ReadJSONConfig("config/client_config.json", &config)
-	util.CheckErr(err, "Error reading client config: %v\n", err)
+	err = util.ReadJSONConfig(filename, &config)
+	util.CheckErr(err, "failed to locate or parse config for client: %d\n", clientIdx)
 
 	tracer := tracing.NewTracer(tracing.TracerConfig{
 		ServerAddress:  config.TracingServerAddr,
@@ -40,7 +48,7 @@ func main() {
 	notifCh, err := client.Start(tracer, config.ClientID, config.LocalServerIPPort, config.ServerIPPortList, config.ChCapacity)
 	util.CheckErr(err, "Error reading client config: %v\n", err)
 
-	if len(os.Args) == 2 && os.Args[1] == "-i" {
+	if len(os.Args) == 3 && os.Args[2] == "-i" {
 		runInteractiveClient(client, notifCh)
 	} else {
 		runTestScript(client, notifCh)
