@@ -15,6 +15,12 @@ type GetArgs struct {
 	GToken   tracing.TracingToken
 }
 
+type RaftGetReq struct {
+	ClientId string
+	Key      string
+	OpId     uint8
+}
+
 type GetRes struct {
 	ClientId string
 	OpId     uint8
@@ -29,6 +35,13 @@ type PutArgs struct {
 	Value    string
 	OpId     uint8
 	PToken   tracing.TracingToken
+}
+
+type RaftPutReq struct {
+	ClientId string
+	Key      string
+	Value    string
+	OpId     uint8
 }
 
 type PutRes struct {

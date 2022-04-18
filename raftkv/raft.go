@@ -164,6 +164,7 @@ type SendAppendEntries struct {
 	PrevLogTerm  int // term of previous log index's log
 	LeaderCommit int // last index of committed log
 	SendID       int // ID of raft instance that sends the request vote
+	Entries      []LogEntry
 }
 
 type ReceiveAppendEntries struct {
@@ -173,6 +174,7 @@ type ReceiveAppendEntries struct {
 	PrevLogTerm  int // term of previous log index's log
 	LeaderCommit int // last index of committed log
 	ReceiveID    int // ID of raft instace that receives the request vote
+	Entries      []LogEntry
 }
 
 type AppendEntriesRes struct {
@@ -288,7 +290,7 @@ func (remoteRaft *RemoteRaft) AppendEntries(args *AppendEntriesArgs, reply *Appe
 	reply.ConflictTerm = -1
 
 	trace := rf.RTrace.Tracer.ReceiveToken(args.Token)
-	trace.RecordAction(ReceiveAppendEntries{args.Term, args.LeaderId, args.PrevLogIndex, args.PrevLogTerm, args.LeaderCommit, rf.SelfIndex})
+	trace.RecordAction(ReceiveAppendEntries{args.Term, args.LeaderId, args.PrevLogIndex, args.PrevLogTerm, args.LeaderCommit, rf.SelfIndex, args.Entries})
 
 	reply.Token = trace.GenerateToken()
 	if args.Term < rf.CurrentTerm {
@@ -384,6 +386,7 @@ func (rf *Raft) Execute(command interface{}, reqToken tracing.TracingToken) trac
 // where it can later be retrieved after a crash and restart.
 //
 func (rf *Raft) persist() {
+	gob.Register(util.RaftPutReq{})
 	w := new(bytes.Buffer)
 	e := gob.NewEncoder(w)
 	pd := PersistData{rf.CurrentTerm, rf.VotedFor, rf.Logs}
@@ -420,6 +423,8 @@ func (rf *Raft) readPersist() {
 
 	gob.Register(util.PutArgs{})
 	gob.Register(util.GetArgs{})
+	gob.Register(util.RaftGetReq{})
+	gob.Register(util.RaftPutReq{})
 
 	buf := bytes.NewBuffer(data)
 	dec := gob.NewDecoder(buf)
@@ -534,7 +539,7 @@ func (rf *Raft) broadcastAppendEntries() {
 
 func (rf *Raft) sendAppendEntries(serverIdx int, args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	trace := rf.RTrace.Tracer.CreateTrace()
-	trace.RecordAction(SendAppendEntries{args.Term, args.LeaderId, args.PrevLogIndex, args.PrevLogTerm, args.LeaderCommit, rf.SelfIndex})
+	trace.RecordAction(SendAppendEntries{args.Term, args.LeaderId, args.PrevLogIndex, args.PrevLogTerm, args.LeaderCommit, rf.SelfIndex, args.Entries})
 	args.Token = trace.GenerateToken()
 	err := rf.Peers[serverIdx].Call("Raft.AppendEntries", args, reply)
 	if err != nil {
@@ -746,7 +751,7 @@ func StartRaft(peers []*util.RPCEndPoint, selfidx int,
 
 	gob.Register(util.GetArgs{})
 	gob.Register(util.PutArgs{})
-	gob.Register(LogEntry{})
+	gob.Register(util.RaftPutReq{})
 
 	rf.RTrace.RecordAction(RaftStart{rf.SelfIndex})
 
@@ -772,7 +777,7 @@ func (rf *Raft) runRaft() {
 			select {
 			case <-rf.HbCh:
 			case <-rf.VoteCh:
-			case <-time.After(time.Duration(randomTimeout(700, 1000)) * time.Millisecond):
+			case <-time.After(time.Duration(randomTimeout(800, 1000)) * time.Millisecond):
 				rf.setToCandidate(FOLLOWER)
 			}
 		case CANDIDATE:
@@ -783,7 +788,7 @@ func (rf *Raft) runRaft() {
 			// if it's this case then it's already a follower
 			case <-rf.WinElectCh:
 				rf.setToLeader()
-			case <-time.After(time.Duration(randomTimeout(700, 1000)) * time.Millisecond):
+			case <-time.After(time.Duration(randomTimeout(800, 1000)) * time.Millisecond):
 				rf.setToCandidate(CANDIDATE)
 			}
 		case LEADER:
@@ -791,7 +796,7 @@ func (rf *Raft) runRaft() {
 			select {
 			case <-rf.StepDownCh:
 			// same as above
-			case <-time.After(600 * time.Millisecond):
+			case <-time.After(400 * time.Millisecond):
 				rf.Mutex.Lock()
 				rf.broadcastAppendEntries()
 				rf.Mutex.Unlock()
