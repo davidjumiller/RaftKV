@@ -45,6 +45,7 @@ type GetSend GetStart
 type BufferedGet struct {
 	Args    *util.GetArgs
 	PutOpId uint8
+	Trace   *tracing.Trace
 }
 
 type GetResultRecvd struct {
@@ -148,7 +149,7 @@ func (d *KVS) Get(key string) error {
 	d.OpId = d.OpId + 1
 	d.unlockLog("op", d.OpMutex)
 
-	getArgs := d.createGetArgs(key, localOpId)
+	getArgs, gTrace := d.createGetArgs(key, localOpId)
 	if numPuts > 0 {
 		d.lockLog("last outstanding put", d.PutMutex)
 		elem := outstandingPuts.Back()
@@ -156,13 +157,14 @@ func (d *KVS) Get(key string) error {
 		bufferedGet := &BufferedGet{
 			Args:    getArgs,
 			PutOpId: put.OpId,
+			Trace:   gTrace,
 		}
 		d.unlockLog("last outstanding put", d.PutMutex)
 		d.lockLog("add buffered get", d.GetMutex)
 		d.BufferedGets[key].PushBack(bufferedGet)
 		d.unlockLog("add buffered get", d.GetMutex)
 	} else {
-		d.sendGet(getArgs)
+		d.sendGet(getArgs, gTrace)
 	}
 	return nil
 }
@@ -177,9 +179,9 @@ func (d *KVS) Put(key string, value string) error {
 
 	// Send put to head via RPC
 	d.lockLog("put", d.PutMutex)
-	putArgs := d.createPutArgs(key, value, localOpId)
+	putArgs, pTrace := d.createPutArgs(key, value, localOpId)
 	d.addOutstandingPut(key, putArgs)
-	d.sendPut(localOpId, putArgs)
+	d.sendPut(pTrace, localOpId, putArgs)
 	d.unlockLog("put", d.PutMutex)
 	return nil
 }
@@ -205,7 +207,7 @@ func (d *KVS) closeRoutines() {
 }
 
 // Creates PutArgs struct for a new Put
-func (d *KVS) createPutArgs(key string, value string, localOpId uint8) *util.PutArgs {
+func (d *KVS) createPutArgs(key string, value string, localOpId uint8) (*util.PutArgs, *tracing.Trace) {
 	// Start Put trace
 	trace := d.Tracer.CreateTrace()
 	trace.RecordAction(PutStart{d.ClientId, localOpId, key, value})
@@ -215,31 +217,31 @@ func (d *KVS) createPutArgs(key string, value string, localOpId uint8) *util.Put
 		OpId:     localOpId,
 		Key:      key,
 		Value:    value,
-		PToken:   trace.GenerateToken(),
-	}
+		PToken:   nil,
+	}, trace
 }
 
 // Creates GetArgs struct for a new Get
-func (d *KVS) createGetArgs(key string, localOpId uint8) *util.GetArgs {
+func (d *KVS) createGetArgs(key string, localOpId uint8) (*util.GetArgs, *tracing.Trace) {
 	// Start Get trace
 	trace := d.Tracer.CreateTrace()
 	trace.RecordAction(GetStart{d.ClientId, localOpId, key})
 
 	return &util.GetArgs{
-		ClientId: d.ClientId,
-		OpId:     localOpId,
-		Key:      key,
-		GToken:   trace.GenerateToken(),
-	}
+			ClientId: d.ClientId,
+			OpId:     localOpId,
+			Key:      key,
+			GToken:   nil,
+		},
+		trace
 }
 
 // Sends a Get request to a server and prepares to receive the result
-func (d *KVS) sendGet(getArgs *util.GetArgs) {
+func (d *KVS) sendGet(getArgs *util.GetArgs, trace *tracing.Trace) {
 	d.lockLog("rtt", d.RTTMutex)
 	d.InProgress[getArgs.OpId] = time.Now()
 	d.unlockLog("rtt", d.RTTMutex)
 
-	trace := d.Tracer.ReceiveToken(getArgs.GToken)
 	trace.RecordAction(GetSend{getArgs.ClientId, getArgs.OpId, getArgs.Key})
 	getArgs.GToken = trace.GenerateToken()
 
@@ -254,15 +256,15 @@ func (d *KVS) sendGet(getArgs *util.GetArgs) {
 	<-time.After(timeout)
 	if getResult.ClientId == getArgs.ClientId && getResult.OpId == getArgs.OpId {
 		// Successful reply
-		d.getReceived(trace, getResult)
+		d.getReceived(getResult)
 	} else {
 		d.tryNextServer()
-		d.sendGet(getArgs)
+		d.sendGet(getArgs, trace)
 	}
 }
 
-func (d *KVS) getReceived(trace *tracing.Trace, getResult *util.GetRes) {
-	trace = d.Tracer.ReceiveToken(getResult.GToken)
+func (d *KVS) getReceived(getResult *util.GetRes) {
+	trace := d.Tracer.ReceiveToken(getResult.GToken)
 	trace.RecordAction(GetResultRecvd{
 		ClientId: getResult.ClientId,
 		OpId:     getResult.OpId,
@@ -289,7 +291,7 @@ func (d *KVS) sendBufferedGets(key string, putOpId uint8) {
 			getToSend := elem
 			elem = elem.Next()
 			bufferedGets.Remove(getToSend)
-			d.sendGet(bufferedGet.Args)
+			d.sendGet(bufferedGet.Args, bufferedGet.Trace)
 		} else {
 			elem = elem.Next()
 		}
@@ -298,12 +300,11 @@ func (d *KVS) sendBufferedGets(key string, putOpId uint8) {
 }
 
 // Sends a put to the server and waits for a result
-func (d *KVS) sendPut(localOpId uint8, putArgs *util.PutArgs) {
+func (d *KVS) sendPut(trace *tracing.Trace, localOpId uint8, putArgs *util.PutArgs) {
 	d.lockLog("rtt", d.RTTMutex)
 	d.InProgress[localOpId] = time.Now()
 	d.unlockLog("rtt", d.RTTMutex)
 
-	trace := d.Tracer.ReceiveToken(putArgs.PToken)
 	trace.RecordAction(PutSend{putArgs.ClientId, putArgs.OpId, putArgs.Key, putArgs.Value})
 	putArgs.PToken = trace.GenerateToken()
 
@@ -321,7 +322,7 @@ func (d *KVS) sendPut(localOpId uint8, putArgs *util.PutArgs) {
 		d.putReceived(putResult, putArgs)
 	} else {
 		d.tryNextServer()
-		d.sendPut(localOpId, putArgs)
+		d.sendPut(trace, localOpId, putArgs)
 	}
 }
 
