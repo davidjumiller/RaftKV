@@ -423,7 +423,6 @@ func (rf *Raft) readPersist() {
 
 	gob.Register(util.PutArgs{})
 	gob.Register(util.GetArgs{})
-	gob.Register(util.RaftGetReq{})
 	gob.Register(util.RaftPutReq{})
 
 	buf := bytes.NewBuffer(data)

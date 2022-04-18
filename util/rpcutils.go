@@ -15,12 +15,6 @@ type GetArgs struct {
 	GToken   tracing.TracingToken
 }
 
-type RaftGetReq struct {
-	ClientId string
-	Key      string
-	OpId     uint8
-}
-
 type GetRes struct {
 	ClientId string
 	OpId     uint8
