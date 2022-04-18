@@ -427,18 +427,14 @@ func (d *KVS) connectToServer() {
 		fmt.Println("Could not connect to", serverAddr)
 		d.tryNextServer()
 	} else {
-		trace := d.Tracer.CreateTrace()
-		trace.RecordAction(NewServerConnection{d.ClientId, d.ServerId, serverAddr})
+		d.KTrace.RecordAction(NewServerConnection{d.ClientId, d.ServerId, serverAddr})
 	}
 }
 
 // attempts to connect to next server on the list
 func (d *KVS) tryNextServer() {
 	d.lockLog("next server index", d.IndexMutex)
-	d.ServerId += 1
-	if d.ServerId >= len(d.ServerList) {
-		d.ServerId = 0
-	}
+	d.ServerId = (d.ServerId + 1) % len(d.ServerList)
 	d.unlockLog("next server index", d.IndexMutex)
 	d.connectToServer()
 }
