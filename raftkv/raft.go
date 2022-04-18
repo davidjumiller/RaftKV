@@ -188,7 +188,7 @@ type AppendEntriesRes struct {
 type ExecuteCommand struct {
 	Term     int
 	LeaderID int
-	Command  interface{}
+	Command  util.RaftPutReq
 }
 
 type Commit struct {
@@ -369,7 +369,7 @@ func (rf *Raft) GetState() RaftState {
 }
 
 // Execute a command, called when the server gets a request
-func (rf *Raft) Execute(command interface{}, reqToken tracing.TracingToken) tracing.TracingToken {
+func (rf *Raft) Execute(command util.RaftPutReq, reqToken tracing.TracingToken) tracing.TracingToken {
 	rf.Mutex.Lock()
 	defer rf.Mutex.Unlock()
 

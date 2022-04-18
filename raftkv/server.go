@@ -12,47 +12,57 @@ import (
 
 type PutRecvd struct {
 	ClientId string
+	OpId     uint8
 	Key      string
 	Value    string
 }
 
 type PutFwd struct {
 	ClientId string
-	Key      string
-	Value    string
-}
-
-type PutFwdRecvd struct {
-	ClientId string
+	OpId     uint8
 	Key      string
 	Value    string
 }
 
 type PutResult struct {
 	ClientId string
+	OpId     uint8
 	Key      string
 	Value    string
 }
 
-type PutResultFwd PutResult
+type PutResultFwd struct {
+	ClientId string
+	OpId     uint8
+	Key      string
+	Value    string
+}
 
 type GetRecvd struct {
 	ClientId string
+	OpId     uint8
 	Key      string
 }
 
 type GetFwd struct {
 	ClientId string
+	OpId     uint8
 	Key      string
 }
 
 type GetResult struct {
 	ClientId string
+	OpId     uint8
 	Key      string
 	Value    string
 }
 
-type GetResultFwd GetResult
+type GetResultFwd struct {
+	ClientId string
+	OpId     uint8
+	Key      string
+	Value    string
+}
 
 type ServerStart struct {
 	ServerIdx int
@@ -85,19 +95,23 @@ type KVServer struct {
 	ServerAddr string
 	ServerList []string
 	Raft       *Raft             // this server's Raft instance
-	LastLdrID  int               // This is the ID of the last known leader server
+	LastLdrID  int               // ID of the last known leader server
 	Mutex      sync.Mutex        // Mutex lock for KVServer
 	Conn       *net.TCPConn      // TCP Connection to leader server
 	Client     *rpc.Client       // RPC Client for leader server
 	ApplyCh    chan ApplyMsg     // channel to receive updates from Raft
 	Store      map[string]string // in-memory key-value store
 	Tracer     *tracing.Tracer
+
+	// Puts currently being processed by Raft, where Puts are identified by
+	// ClientId and OpId, as in OutstandingPuts[Put.ClientId][Put.OpId]
+	OutstandingPuts map[string]*util.SafeUInt8Set
 }
 
 func NewServer() *KVServer {
 	return &KVServer{
-		ServerList: []string{},
-		Store:      make(map[string]string),
+		Store:           make(map[string]string),
+		OutstandingPuts: make(map[string]*util.SafeUInt8Set),
 	}
 }
 
@@ -119,7 +133,7 @@ func (kvs *KVServer) Start(serverIdx int, serverAddr string, serverList []string
 	trace.RecordAction(ServerStart{serverIdx})
 
 	// Check raft state
-	kvs.checkLeader(kvs.Raft.GetState())
+	kvs.checkLeader()
 
 	// Start listening for RPCs
 	rpcServer := &RemoteServer{kvs}
@@ -145,42 +159,41 @@ func (kvs *KVServer) Start(serverIdx int, serverAddr string, serverList []string
 }
 
 func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
-
 	kvs := rs.KVServer
-	raftState := kvs.Raft.GetState()
-	// Check if leader connection needs to be updated, if connection can't be made, drop this request
-	err := kvs.checkLeader(raftState)
+
+	trace := kvs.Tracer.ReceiveToken(getArgs.GToken)
+	trace.RecordAction(GetRecvd{
+		ClientId: getArgs.ClientId,
+		OpId:     getArgs.OpId,
+		Key:      getArgs.Key,
+	})
+
+	// Check if leader connection needs to be updated; drop request if connection can't be made
+	err := kvs.checkLeader()
 	if err != nil {
 		fmt.Println("Connection to leader failed, dropping request")
 		return err
 	}
 
-	trace := kvs.Tracer.ReceiveToken(getArgs.GToken)
-	trace.RecordAction(GetRecvd{
-		ClientId: getArgs.ClientId,
-		Key:      getArgs.Key,
-	})
-
 	if kvs.ServerIdx == kvs.LastLdrID {
-		// Execute (log) Get request on Raft
-		// token := kvs.Raft.Execute(*getArgs, trace.GenerateToken())
-		// trace = kvs.Tracer.ReceiveToken(token)
-
-		// Return value stored at key
-		val := kvs.Store[getArgs.Key]
+		// Return Get response to caller
+		value := kvs.Store[getArgs.Key]
 		trace.RecordAction(GetResult{
 			ClientId: getArgs.ClientId,
+			OpId:     getArgs.OpId,
 			Key:      getArgs.Key,
-			Value:    kvs.Store[getArgs.Key],
+			Value:    value,
 		})
 		getRes.ClientId = getArgs.ClientId
 		getRes.OpId = getArgs.OpId
 		getRes.Key = getArgs.Key
-		getRes.Value = val
+		getRes.Value = value
 		getRes.GToken = trace.GenerateToken()
 	} else {
+		// Forward Get request to leader
 		trace.RecordAction(GetFwd{
 			ClientId: getArgs.ClientId,
+			OpId:     getArgs.OpId,
 			Key:      getArgs.Key,
 		})
 		getArgs.GToken = trace.GenerateToken()
@@ -188,9 +201,12 @@ func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 		if err != nil {
 			return err
 		}
+
+		// Forward Get response back to caller
 		trace = kvs.Tracer.ReceiveToken(getRes.GToken)
 		trace.RecordAction(GetResultFwd{
 			ClientId: getRes.ClientId,
+			OpId:     getArgs.OpId,
 			Key:      getRes.Key,
 			Value:    getRes.Value,
 		})
@@ -201,41 +217,51 @@ func (rs *RemoteServer) Get(getArgs *util.GetArgs, getRes *util.GetRes) error {
 }
 
 func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
-
 	kvs := rs.KVServer
-	raftState := kvs.Raft.GetState()
-	// Check if leader connection needs to be updated, if connection can't be made, drop this request
-	err := kvs.checkLeader(raftState)
+
+	trace := kvs.Tracer.ReceiveToken(putArgs.PToken)
+	trace.RecordAction(PutRecvd{
+		ClientId: putArgs.ClientId,
+		OpId:     putArgs.OpId,
+		Key:      putArgs.Key,
+		Value:    putArgs.Value,
+	})
+
+	// Check if leader connection needs to be updated; drop request if connection can't be made
+	err := kvs.checkLeader()
 	if err != nil {
 		fmt.Println("Connection to leader failed, dropping request")
 		return err
 	}
 
-	trace := kvs.Tracer.ReceiveToken(putArgs.PToken)
-	trace.RecordAction(PutRecvd{
-		ClientId: putArgs.ClientId,
-		Key:      putArgs.Key,
-		Value:    putArgs.Value,
-	})
-
 	if kvs.ServerIdx == kvs.LastLdrID {
 		// Execute (log) Put request on Raft
+		kvs.addOutstandingPut(putArgs)
 		token := kvs.Raft.Execute(util.RaftPutReq{putArgs.ClientId, putArgs.Key, putArgs.Value, putArgs.OpId}, trace.GenerateToken())
 		trace = kvs.Tracer.ReceiveToken(token)
 
+		// Wait for Raft to finish logging Put
+		for kvs.OutstandingPuts[putArgs.ClientId].Has(putArgs.OpId) {
+		}
+
+		// Return Put response to caller
+		value := kvs.Store[putArgs.Key]
 		trace.RecordAction(PutResult{
 			ClientId: putArgs.ClientId,
+			OpId:     putArgs.OpId,
 			Key:      putArgs.Key,
-			Value:    putArgs.Value,
+			Value:    value,
 		})
 		putRes.ClientId = putArgs.ClientId
 		putRes.OpId = putArgs.OpId
 		putRes.Key = putArgs.Key
-		putRes.Value = putArgs.Value
+		putRes.Value = value
 		putRes.PToken = trace.GenerateToken()
 	} else {
+		// Forward Put request to leader
 		trace.RecordAction(PutFwd{
 			ClientId: putArgs.ClientId,
+			OpId:     putArgs.OpId,
 			Key:      putArgs.Key,
 			Value:    putArgs.Value,
 		})
@@ -244,9 +270,12 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 		if err != nil {
 			return err
 		}
+
+		// Forward Put response back to caller
 		trace = kvs.Tracer.ReceiveToken(putRes.PToken)
 		trace.RecordAction(PutResultFwd{
 			ClientId: putRes.ClientId,
+			OpId:     putRes.OpId,
 			Key:      putRes.Key,
 			Value:    putRes.Value,
 		})
@@ -256,33 +285,47 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 	return nil
 }
 
+func (kvs *KVServer) addOutstandingPut(putArgs *util.PutArgs) {
+	_, ok := kvs.OutstandingPuts[putArgs.ClientId]
+	if !ok {
+		kvs.OutstandingPuts[putArgs.ClientId] = util.NewSafeUInt8Set()
+	}
+	kvs.OutstandingPuts[putArgs.ClientId].Add(putArgs.OpId)
+}
+
 // Update store with state changes notified by Raft via ApplyCh
 func (kvs *KVServer) updateStore() {
-	for {
-		applyMsg := <-kvs.Raft.ApplyCh
+	for applyMsg := range kvs.Raft.ApplyCh {
 		putArgs, ok := applyMsg.Command.(util.RaftPutReq)
 		if ok {
 			// Command is Put; update store
 			kvs.Store[putArgs.Key] = putArgs.Value
+
+			if kvs.ServerIdx == kvs.LastLdrID {
+				// Remove outstanding Put to signal that this Put may be returned
+				kvs.OutstandingPuts[putArgs.ClientId].Remove(putArgs.OpId)
+			}
 		}
 	}
 }
 
-func (kvs *KVServer) checkLeader(raftState RaftState) error {
+func (kvs *KVServer) checkLeader() error {
 	/* Locking to prevent the case where util.TryMakeClient() is called more than once simultaneously,
 	leading to only one get/put succeeding and the rest dropping their requests */
 	kvs.Mutex.Lock()
 	defer kvs.Mutex.Unlock()
 
-	// Case where server is the leader
+	raftState := kvs.Raft.GetState()
+
 	if kvs.ServerIdx == raftState.LeaderID {
+		// Case where server is the leader
 		kvs.Conn = nil
 		kvs.Client = nil
 		kvs.LastLdrID = raftState.LeaderID
 		return nil
 
-		// Case where server needs to make new connection to the leader
 	} else if kvs.LastLdrID != raftState.LeaderID {
+		// Case where server needs to make new connection to the leader
 		if kvs.LastLdrID != kvs.ServerIdx {
 			if kvs.Client != nil {
 				kvs.Client.Close()
