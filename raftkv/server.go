@@ -84,19 +84,23 @@ type KVServer struct {
 	ServerAddr string
 	ServerList []string
 	Raft       *Raft             // this server's Raft instance
-	LastLdrID  int               // This is the ID of the last known leader server
+	LastLdrID  int               // ID of the last known leader server
 	Mutex      sync.Mutex        // Mutex lock for KVServer
 	Conn       *net.TCPConn      // TCP Connection to leader server
 	Client     *rpc.Client       // RPC Client for leader server
 	ApplyCh    chan ApplyMsg     // channel to receive updates from Raft
 	Store      map[string]string // in-memory key-value store
 	Tracer     *tracing.Tracer
+
+	// Puts currently being processed by Raft, where Puts are identified by
+	// ClientId and OpId, as in OutstandingPuts[Put.ClientId][Put.OpId]
+	OutstandingPuts map[string]*util.SafeUInt8Set
 }
 
 func NewServer() *KVServer {
 	return &KVServer{
-		ServerList: []string{},
-		Store:      make(map[string]string),
+		Store:           make(map[string]string),
+		OutstandingPuts: make(map[string]*util.SafeUInt8Set),
 	}
 }
 
@@ -220,10 +224,15 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 
 	if kvs.ServerIdx == kvs.LastLdrID {
 		// Execute (log) Put request on Raft
+		kvs.addOutstandingPut(putArgs)
 		token := kvs.Raft.Execute(*putArgs, trace.GenerateToken())
-		trace = kvs.Tracer.ReceiveToken(token)
+
+		// Wait for Raft to finish logging Put
+		for kvs.OutstandingPuts[putArgs.ClientId].Has(putArgs.OpId) {
+		}
 
 		// Return Put response to caller
+		trace = kvs.Tracer.ReceiveToken(token)
 		trace.RecordAction(PutResult{
 			ClientId: putArgs.ClientId,
 			Key:      putArgs.Key,
@@ -260,6 +269,14 @@ func (rs *RemoteServer) Put(putArgs *util.PutArgs, putRes *util.PutRes) error {
 	return nil
 }
 
+func (kvs *KVServer) addOutstandingPut(putArgs *util.PutArgs) {
+	_, ok := kvs.OutstandingPuts[putArgs.ClientId]
+	if !ok {
+		kvs.OutstandingPuts[putArgs.ClientId] = util.NewSafeUInt8Set()
+	}
+	kvs.OutstandingPuts[putArgs.ClientId].Add(putArgs.OpId)
+}
+
 // Update store with state changes notified by Raft via ApplyCh
 func (kvs *KVServer) updateStore() {
 	for applyMsg := range kvs.Raft.ApplyCh {
@@ -267,6 +284,11 @@ func (kvs *KVServer) updateStore() {
 		if ok {
 			// Command is Put; update store
 			kvs.Store[putArgs.Key] = putArgs.Value
+
+			if kvs.ServerIdx == kvs.LastLdrID {
+				// Remove outstanding Put to signal that this Put may be returned
+				kvs.OutstandingPuts[putArgs.ClientId].Remove(putArgs.OpId)
+			}
 		}
 	}
 }
