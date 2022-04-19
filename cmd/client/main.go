@@ -48,8 +48,34 @@ func main() {
 	notifCh, err := client.Start(tracer, config.ClientID, config.ServerIPPortList, config.ChCapacity)
 	util.CheckErr(err, "Error reading client config: %v\n", err)
 
+	// Setup second client if there's one
+	var notifCh2 raftkv.NotifyChannel
+	var client2 *raftkv.KVS
+	if len(os.Args) == 3 && os.Args[2] != "-i" {
+		clientIdx2, err := strconv.Atoi(os.Args[2])
+		util.CheckErr(err, "failed to parse client index")
+
+		filename := fmt.Sprintf("./config/client_config_%d.json", clientIdx2)
+		fmt.Println("Client config file:", filename)
+		var config ClientConfig
+		err = util.ReadJSONConfig(filename, &config)
+		util.CheckErr(err, "failed to locate or parse config for client: %d\n", clientIdx2)
+
+		tracer := tracing.NewTracer(tracing.TracerConfig{
+			ServerAddress:  config.TracingServerAddr,
+			TracerIdentity: config.TracingIdentity,
+			Secret:         config.Secret,
+		})
+
+		client2 := raftkv.NewKVS()
+		notifCh2, err = client2.Start(tracer, config.ClientID, config.ServerIPPortList, config.ChCapacity)
+		util.CheckErr(err, "Error reading client config: %v\n", err)
+	}
+
 	if len(os.Args) == 3 && os.Args[2] == "-i" {
 		runInteractiveClient(client, notifCh)
+	} else if len(os.Args) == 3 && os.Args[2] != "-i" {
+		runTwoClientsTestScript(client, notifCh, client2, notifCh2)
 	} else {
 		runTestScript(client, notifCh)
 	}
@@ -83,6 +109,42 @@ func runTestScript(client *raftkv.KVS, notifCh raftkv.NotifyChannel) {
 	for i := 0; i < 9; i++ {
 		result := <-notifCh
 		log.Printf("%s%v%s\n", successColour, result, resetColour)
+	}
+	client.Stop()
+}
+
+func runTwoClientsTestScript(client *raftkv.KVS, notifCh raftkv.NotifyChannel, client2 *raftkv.KVS, notifCh2 raftkv.NotifyChannel) {
+	// Put a key-value pair
+	err := client.Put("key2", "value2")
+	util.CheckErr(err, "Error putting value %v, opId: %v\b", err)
+
+	// Get a key's value
+	err = client2.Get("key1")
+	util.CheckErr(err, "Error getting value %v, opId: %v\b", err)
+
+	// Sequence of interleaved gets and puts for two clients
+	err = client2.Put("key1", "test1")
+	util.CheckErr(err, "Error putting value %v, opId: %v\b", err)
+	err = client.Get("key1")
+	util.CheckErr(err, "Error getting value %v, opId: %v\b", err)
+	err = client.Put("key1", "test2")
+	util.CheckErr(err, "Error putting value %v, opId: %v\b", err)
+	err = client2.Get("key1")
+	util.CheckErr(err, "Error getting value %v, opId: %v\b", err)
+	err = client.Get("key1")
+	util.CheckErr(err, "Error getting value %v, opId: %v\b", err)
+	err = client.Put("key1", "test3")
+	util.CheckErr(err, "Error putting value %v, opId: %v\b", err)
+	err = client2.Get("key1")
+	util.CheckErr(err, "Error getting value %v, opId: %v\b", err)
+
+	for i := 0; i < 9; i++ {
+		select {
+		case result := <-notifCh:
+			log.Printf("%s%v%s\n", successColour, result, resetColour)
+		case result := <-notifCh2:
+			log.Printf("%s%v%s\n", successColour, result, resetColour)
+		}
 	}
 	client.Stop()
 }
