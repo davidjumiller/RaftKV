@@ -133,9 +133,9 @@ func runTwoClientsTestScript(client *raftkv.KVS, notifCh raftkv.NotifyChannel, c
 	util.CheckErr(err, "Error getting value %v, opId: %v\b", err)
 	err = client.Get("key1")
 	util.CheckErr(err, "Error getting value %v, opId: %v\b", err)
-	err = client.Put("key1", "test3")
+	err = client2.Put("key2", "test3")
 	util.CheckErr(err, "Error putting value %v, opId: %v\b", err)
-	err = client2.Get("key1")
+	err = client.Get("key2")
 	util.CheckErr(err, "Error getting value %v, opId: %v\b", err)
 
 	for i := 0; i < 9; i++ {
