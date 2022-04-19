@@ -73,8 +73,7 @@ type ServerListening struct {
 }
 
 type KVServerConfig struct {
-	ServerIdx  int    // this server's index into ServerList and RaftList
-	ServerAddr string // address from which this server sends RPCs
+	ServerIdx int // this server's index into ServerList and RaftList
 
 	// addresses on which of each server in the system listens for RPCs,
 	// where this server's address is at index ServerIdx, i.e. ServerList[ServerIdx]
@@ -92,7 +91,6 @@ type KVServerConfig struct {
 
 type KVServer struct {
 	ServerIdx  int
-	ServerAddr string
 	ServerList []string
 	Raft       *Raft             // this server's Raft instance
 	LastLdrID  int               // ID of the last known leader server
@@ -118,9 +116,8 @@ type RemoteServer struct {
 	KVServer *KVServer
 }
 
-func (kvs *KVServer) Start(serverIdx int, serverAddr string, serverList []string, tracer *tracing.Tracer, raft *Raft) error {
+func (kvs *KVServer) Start(serverIdx int, serverList []string, tracer *tracing.Tracer, raft *Raft) error {
 	kvs.ServerIdx = serverIdx
-	kvs.ServerAddr = serverAddr
 	kvs.ServerList = serverList
 	kvs.Tracer = tracer
 	kvs.Raft = raft

@@ -46,5 +46,5 @@ func main() {
 
 	// Start Server
 	server := raftkv.NewServer()
-	err = server.Start(serverIdx, config.ServerAddr, config.ServerList, stracer, raft)
+	err = server.Start(serverIdx, config.ServerList, stracer, raft)
 }
