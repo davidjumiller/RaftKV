@@ -66,8 +66,8 @@ func main() {
 			TracerIdentity: config.TracingIdentity,
 			Secret:         config.Secret,
 		})
-
-		client2 := raftkv.NewKVS()
+		
+		client2 = raftkv.NewKVS()
 		notifCh2, err = client2.Start(tracer, config.ClientID, config.ServerIPPortList, config.ChCapacity)
 		util.CheckErr(err, "Error reading client config: %v\n", err)
 	}
@@ -147,6 +147,7 @@ func runTwoClientsTestScript(client *raftkv.KVS, notifCh raftkv.NotifyChannel, c
 		}
 	}
 	client.Stop()
+	client2.Stop()
 }
 
 // Run client in an interactive command line
