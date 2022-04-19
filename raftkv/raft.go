@@ -723,7 +723,7 @@ func StartRaft(peers []*util.RPCEndPoint, selfidx int,
 	rf.Peers = peers
 	rf.PeersLen = len(peers)
 	rf.SelfIndex = selfidx
-	rf.CurrLeaderIndex = 0 // M2: We will assume 0 is the leader
+	rf.CurrLeaderIndex = -1
 	rf.ApplyCh = applyCh
 
 	rf.VotedFor = -1
