@@ -141,9 +141,9 @@ func runTwoClientsTestScript(client *raftkv.KVS, notifCh raftkv.NotifyChannel, c
 	for i := 0; i < 9; i++ {
 		select {
 		case result := <-notifCh:
-			log.Printf("%s%v%s\n", successColour, result, resetColour)
+			log.Printf("First Client:%s%v%s\n", successColour, result, resetColour)
 		case result := <-notifCh2:
-			log.Printf("%s%v%s\n", successColour, result, resetColour)
+			log.Printf("Second Client:%s%v%s\n", successColour, result, resetColour)
 		}
 	}
 	client.Stop()
