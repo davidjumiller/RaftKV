@@ -72,6 +72,11 @@ type NewServerConnection struct {
 	ServerAddr string
 }
 
+type Op struct {
+	Trace    *tracing.Trace
+	Args     interface{}
+}
+
 // NotifyChannel is used for notifying the client about a result for an operation.
 type NotifyChannel chan ResultStruct
 
@@ -92,6 +97,7 @@ type KVS struct {
 	RTT          time.Duration
 	Tracer       *tracing.Tracer
 	InProgress   map[uint8]time.Time // Map representing sent requests that haven't been responded to
+	KeyMutex     map[string]*sync.Mutex
 	PutMutex     *sync.Mutex
 	GetMutex     *sync.Mutex
 	RTTMutex     *sync.Mutex
@@ -99,6 +105,7 @@ type KVS struct {
 	IndexMutex   *sync.Mutex
 	Puts         map[string]*list.List // list of outstanding put ids for a key
 	BufferedGets map[string]*list.List
+	QueuedOps	 map[string]*list.List
 	OpId         uint8
 	AliveCh      chan int
 	Client       *rpc.Client
@@ -109,6 +116,7 @@ func NewKVS() *KVS {
 		NotifyCh:     nil,
 		ServerId:     0,
 		InProgress:   make(map[uint8]time.Time),
+		KeyMutex:     make(map[string]*sync.Mutex),
 		PutMutex:     new(sync.Mutex),
 		GetMutex:     new(sync.Mutex),
 		RTTMutex:     new(sync.Mutex),
@@ -116,6 +124,7 @@ func NewKVS() *KVS {
 		IndexMutex:   new(sync.Mutex),
 		Puts:         make(map[string]*list.List),
 		BufferedGets: make(map[string]*list.List),
+		QueuedOps:    make(map[string]*list.List),
 		OpId:         1,
 		RTT:          3 * time.Second,
 		AliveCh:      make(chan int),
@@ -146,6 +155,7 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, serverIPPortLi
 // The returned value must be delivered asynchronously to the client via the notify-channel channel returned in the Start call.
 // The value OpId is used to identify this request and associate the returned value with this request.
 func (d *KVS) Get(key string) error {
+	/*
 	d.lockLog("check outstanding puts", d.PutMutex)
 	outstandingPuts, exists := d.Puts[key]
 	numPuts := 0
@@ -153,28 +163,29 @@ func (d *KVS) Get(key string) error {
 		numPuts = outstandingPuts.Len()
 	}
 	d.unlockLog("check outstanding puts", d.PutMutex)
+	*/
 	d.lockLog("op", d.OpMutex)
 	localOpId := d.OpId
 	d.OpId = d.OpId + 1
 	d.unlockLog("op", d.OpMutex)
 
 	getArgs, gTrace := d.createGetArgs(key, localOpId)
-	if numPuts > 0 {
-		d.lockLog("last outstanding put", d.PutMutex)
+	/* if numPuts > 0 {
+		// d.lockLog("last outstanding put", d.PutMutex)
 		elem := outstandingPuts.Back()
 		put := elem.Value.(*util.PutArgs)
 		bufferedGet := &BufferedGet{
 			Args:    getArgs,
 			PutOpId: put.OpId,
-			Trace:   gTrace,
 		}
-		d.unlockLog("last outstanding put", d.PutMutex)
+		// d.unlockLog("last outstanding put", d.PutMutex)
 		d.lockLog("add buffered get", d.GetMutex)
 		d.BufferedGets[key].PushBack(bufferedGet)
 		d.unlockLog("add buffered get", d.GetMutex)
 	} else {
-		d.sendGet(getArgs, gTrace)
-	}
+		d.queueOp(key, getArgs)
+	} */
+	d.queueOp(key, getArgs, gTrace)
 	return nil
 }
 
@@ -187,11 +198,9 @@ func (d *KVS) Put(key string, value string) error {
 	localOpId := d.nextOpId()
 
 	// Send put to head via RPC
-	d.lockLog("put", d.PutMutex)
 	putArgs, pTrace := d.createPutArgs(key, value, localOpId)
-	d.addOutstandingPut(key, putArgs)
-	d.sendPut(pTrace, localOpId, putArgs)
-	d.unlockLog("put", d.PutMutex)
+	// d.addOutstandingPut(key, putArgs)
+	d.queueOp(key, putArgs, pTrace)
 	return nil
 }
 
@@ -261,11 +270,17 @@ func (d *KVS) sendGet(getArgs *util.GetArgs, trace *tracing.Trace) {
 		Value:    "",
 		GToken:   nil,
 	}
-	d.Client.Go("KVServer.Get", getArgs, getResult, nil)
-	<-time.After(timeout)
+	res := d.Client.Go("KVServer.Get", getArgs, getResult, nil)
+	select {
+		case <-res.Done:
+		case <-time.After(timeout):
+	}
 	if getResult.ClientId == getArgs.ClientId && getResult.OpId == getArgs.OpId {
 		// Successful reply
 		d.getReceived(getResult)
+		d.QueuedOps[getArgs.Key].Remove(d.QueuedOps[getArgs.Key].Front())
+		// Send next request in the queue for that key
+		go d.nextOp(getArgs.Key)
 	} else {
 		// Timeout -- assume server has failed and try a different one
 		d.tryNextServer()
@@ -325,11 +340,17 @@ func (d *KVS) sendPut(trace *tracing.Trace, localOpId uint8, putArgs *util.PutAr
 		Value:    "",
 		PToken:   nil,
 	}
-	d.Client.Go("KVServer.Put", putArgs, putResult, nil)
-	<-time.After(timeout)
+	res := d.Client.Go("KVServer.Put", putArgs, putResult, nil)
+	select {
+		case <-res.Done:
+		case <-time.After(timeout):
+	}
 	if putResult.ClientId == putArgs.ClientId && putResult.OpId == putArgs.OpId {
 		// Successful reply
 		d.putReceived(putResult, putArgs)
+		d.QueuedOps[putArgs.Key].Remove(d.QueuedOps[putArgs.Key].Front())
+		// Send next request if one has been queued for that key
+		go d.nextOp(putArgs.Key)
 	} else {
 		// Timeout -- assume server has failed and try a different one
 		d.tryNextServer()
@@ -352,7 +373,7 @@ func (d *KVS) putReceived(putResult *util.PutRes, putArgs *util.PutArgs) {
 		Result: putResult.Value,
 	}
 	go d.sendResult(resultStruct)
-	d.removeOutstandingPut(putArgs)
+	// d.removeOutstandingPut(putArgs)
 }
 
 // Removes the put matching putArgs from outstanding puts
@@ -404,6 +425,48 @@ func (d *KVS) lockLog(lockname string, lock *sync.Mutex) {
 func (d *KVS) unlockLog(lockname string, lock *sync.Mutex) {
 	lock.Unlock()
 	//fmt.Println(lockname, "lock released") // for debugging purposes
+}
+
+// Processes the next queued operation for a specific key
+func (d *KVS) nextOp(key string) {
+	// Create a new mutex for this key if one doesnt exist
+	if d.KeyMutex[key] == nil {
+		d.KeyMutex[key] = new(sync.Mutex)
+	}
+	d.KeyMutex[key].Lock()
+	// Process the next Op if there is one, do nothing otherwise
+	if d.QueuedOps[key].Len() > 0 {
+		elem := d.QueuedOps[key].Front()
+		op, ok := elem.Value.(*Op)
+		if !ok {
+			return
+		}
+		// Check the type of operation
+		if put, ok := op.Args.(*util.PutArgs); ok {
+			d.sendPut(op.Trace, put.OpId, put)
+		} else if get, ok := op.Args.(*util.GetArgs); ok {
+			d.sendGet(get, op.Trace)
+		}
+	}
+	d.KeyMutex[key].Unlock()
+}
+
+// Places operation on the queue for its specific key 
+func (d *KVS) queueOp(key string, args interface{}, trace *tracing.Trace) {
+	_, exists := d.QueuedOps[key]
+	// Create new Queue if one doesnt exist
+	if !exists {
+		d.QueuedOps[key] = new(list.List)
+	}
+	op := &Op{
+		Trace: trace,
+		Args: args,
+	}
+	d.QueuedOps[key].PushBack(op)
+	// If queue was previously empty, immediately send next op
+	if d.QueuedOps[key].Len() == 1 {
+		go d.nextOp(key)
+	}
 }
 
 func (d *KVS) nextOpId() uint8 {
