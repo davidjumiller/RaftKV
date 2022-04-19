@@ -1,8 +1,8 @@
 package raftkv
 
 import (
+	"errors"
 	"fmt"
-	"net"
 	"net/rpc"
 	"sync"
 
@@ -73,8 +73,7 @@ type ServerListening struct {
 }
 
 type KVServerConfig struct {
-	ServerIdx  int    // this server's index into ServerList and RaftList
-	ServerAddr string // address from which this server sends RPCs
+	ServerIdx int // this server's index into ServerList and RaftList
 
 	// addresses on which of each server in the system listens for RPCs,
 	// where this server's address is at index ServerIdx, i.e. ServerList[ServerIdx]
@@ -92,12 +91,10 @@ type KVServerConfig struct {
 
 type KVServer struct {
 	ServerIdx  int
-	ServerAddr string
 	ServerList []string
 	Raft       *Raft             // this server's Raft instance
 	LastLdrID  int               // ID of the last known leader server
 	Mutex      sync.Mutex        // Mutex lock for KVServer
-	Conn       *net.TCPConn      // TCP Connection to leader server
 	Client     *rpc.Client       // RPC Client for leader server
 	ApplyCh    chan ApplyMsg     // channel to receive updates from Raft
 	Store      map[string]string // in-memory key-value store
@@ -119,9 +116,8 @@ type RemoteServer struct {
 	KVServer *KVServer
 }
 
-func (kvs *KVServer) Start(serverIdx int, serverAddr string, serverList []string, tracer *tracing.Tracer, raft *Raft) error {
+func (kvs *KVServer) Start(serverIdx int, serverList []string, tracer *tracing.Tracer, raft *Raft) error {
 	kvs.ServerIdx = serverIdx
-	kvs.ServerAddr = serverAddr
 	kvs.ServerList = serverList
 	kvs.Tracer = tracer
 	kvs.Raft = raft
@@ -320,28 +316,36 @@ func (kvs *KVServer) checkLeader() error {
 
 	raftState := kvs.Raft.GetState()
 
-	if kvs.ServerIdx == raftState.LeaderID {
-		// Case where server is the leader
-		kvs.Conn = nil
-		kvs.Client = nil
+	if raftState.LeaderID == -1 {
+		// Leader is unavailable
+		kvs.closeRPCClient()
 		kvs.LastLdrID = raftState.LeaderID
+		return errors.New("no leader elected")
+	}
+	if raftState.LeaderID == kvs.LastLdrID {
+		// Leader remains unchanged
 		return nil
+	}
 
-	} else if kvs.LastLdrID != raftState.LeaderID {
-		// Case where server needs to make new connection to the leader
-		if kvs.LastLdrID != kvs.ServerIdx {
-			if kvs.Client != nil {
-				kvs.Client.Close()
-				kvs.Conn.Close()
-			}
-		}
-		conn, client, err := util.TryMakeClient(kvs.ServerAddr, kvs.ServerList[raftState.LeaderID])
+	// Leader has changed
+	kvs.closeRPCClient()
+	if raftState.LeaderID != kvs.ServerIdx {
+		// Another server is the leader, so this server needs to make new connection to the leader
+		var err error
+		kvs.Client, err = rpc.Dial("tcp", kvs.ServerList[raftState.LeaderID])
 		if err != nil {
 			return err
 		}
-		kvs.Conn = conn
-		kvs.Client = client
-		kvs.LastLdrID = raftState.LeaderID
 	}
+	kvs.LastLdrID = raftState.LeaderID
 	return nil
+}
+
+// Close RPC Client for connection to leader
+// Call only while lock is held
+func (kvs *KVServer) closeRPCClient() {
+	if kvs.Client != nil {
+		kvs.Client.Close()
+		kvs.Client = nil
+	}
 }
