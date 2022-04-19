@@ -302,8 +302,11 @@ func (kvs *KVServer) updateStore() {
 			kvs.Store[putArgs.Key] = putArgs.Value
 
 			if kvs.ServerIdx == kvs.LastLdrID {
-				// Remove outstanding Put to signal that this Put may be returned
-				kvs.OutstandingPuts[putArgs.ClientId].Remove(putArgs.OpId)
+				_, ok = kvs.OutstandingPuts[putArgs.ClientId]
+				if ok {
+					// Remove outstanding Put to signal that this Put may be returned
+					kvs.OutstandingPuts[putArgs.ClientId].Remove(putArgs.OpId)
+				}
 			}
 		}
 	}
