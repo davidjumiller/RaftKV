@@ -13,6 +13,12 @@ import (
 	"github.com/DistributedClocks/tracing"
 )
 
+/*
+	Thanks to [MIT 6.824 Student Repo](https://github.com/WenbinZhu/mit-6.824-labs)
+	The repo shows a implementation of raft for us to reason about
+	how exactly we should implement it in Golang with RPC
+*/
+
 type ApplyMsg struct {
 	CommandValid bool
 	Command      interface{}
