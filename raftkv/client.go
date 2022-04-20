@@ -53,12 +53,6 @@ type GetSend struct {
 	Key      string
 }
 
-type BufferedGet struct {
-	Args    *util.GetArgs
-	PutOpId uint8
-	Trace   *tracing.Trace
-}
-
 type GetResultRecvd struct {
 	ClientId string
 	OpId     uint8
@@ -93,11 +87,8 @@ type KVS struct {
 	ClientId   string
 	ServerId   int // Index of server in ServerList we are connected to
 	ServerList []string
-	RTT        time.Duration
 	Tracer     *tracing.Tracer
-	InProgress map[uint8]time.Time    // Map representing sent requests that haven't been responded to
 	KeyMutex   map[string]*sync.Mutex // A map of keys to mutexes
-	RTTMutex   *sync.Mutex
 	OpMutex    *sync.Mutex
 	IndexMutex *sync.Mutex
 	QueuedOps  map[string]*list.List // A map of keys to queues. Operations are placed on these queues to ensure proper ordering
@@ -110,14 +101,11 @@ func NewKVS() *KVS {
 	return &KVS{
 		NotifyCh:   nil,
 		ServerId:   0,
-		InProgress: make(map[uint8]time.Time),
 		KeyMutex:   make(map[string]*sync.Mutex),
-		RTTMutex:   new(sync.Mutex),
 		OpMutex:    new(sync.Mutex),
 		IndexMutex: new(sync.Mutex),
 		QueuedOps:  make(map[string]*list.List),
 		OpId:       1,
-		RTT:        3 * time.Second,
 		AliveCh:    make(chan int),
 	}
 }
@@ -222,10 +210,6 @@ func (d *KVS) createGetArgs(key string, localOpId uint8) (*util.GetArgs, *tracin
 
 // Sends a Get request to a server and prepares to receive the result
 func (d *KVS) sendGet(getArgs *util.GetArgs, trace *tracing.Trace) {
-	d.RTTMutex.Lock()
-	d.InProgress[getArgs.OpId] = time.Now()
-	d.RTTMutex.Unlock()
-
 	trace.RecordAction(GetSend{getArgs.ClientId, d.ServerId, getArgs.OpId, getArgs.Key})
 	getArgs.GToken = trace.GenerateToken()
 
@@ -276,9 +260,6 @@ func (d *KVS) getReceived(getResult *util.GetRes) {
 
 // Sends a put to the server and waits for a result
 func (d *KVS) sendPut(trace *tracing.Trace, localOpId uint8, putArgs *util.PutArgs) {
-	d.RTTMutex.Lock()
-	d.InProgress[localOpId] = time.Now()
-	d.RTTMutex.Unlock()
 
 	trace.RecordAction(PutSend{putArgs.ClientId, d.ServerId, putArgs.OpId, putArgs.Key, putArgs.Value})
 	putArgs.PToken = trace.GenerateToken()
@@ -299,7 +280,7 @@ func (d *KVS) sendPut(trace *tracing.Trace, localOpId uint8, putArgs *util.PutAr
 			d.sendPut(trace, localOpId, putArgs)
 		} else {
 			// Successful reply
-			d.putReceived(putResult, putArgs)
+			d.putReceived(putResult)
 			d.QueuedOps[putArgs.Key].Remove(d.QueuedOps[putArgs.Key].Front())
 			// Send next request if one has been queued for that key
 			go d.nextOp(putArgs.Key)
@@ -311,7 +292,7 @@ func (d *KVS) sendPut(trace *tracing.Trace, localOpId uint8, putArgs *util.PutAr
 	}
 }
 
-func (d *KVS) putReceived(putResult *util.PutRes, putArgs *util.PutArgs) {
+func (d *KVS) putReceived(putResult *util.PutRes) {
 	trace := d.Tracer.ReceiveToken(putResult.PToken)
 	trace.RecordAction(PutResultRecvd{
 		ClientId: putResult.ClientId,
@@ -326,15 +307,6 @@ func (d *KVS) putReceived(putResult *util.PutRes, putArgs *util.PutArgs) {
 		Result: putResult.Value,
 	}
 	go d.sendResult(resultStruct)
-}
-
-// Updates a KVS's estimated RTT based on an operation's RTT
-func (d *KVS) updateInProgressAndRtt(opId uint8) {
-	newRtt := time.Now().Sub(d.InProgress[opId])
-	d.RTT = (d.RTT + newRtt) / 2
-	d.RTTMutex.Lock()
-	delete(d.InProgress, opId)
-	d.RTTMutex.Unlock()
 }
 
 // Sends result to client
