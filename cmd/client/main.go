@@ -51,7 +51,7 @@ func main() {
 	// Setup second client if there's one
 	var notifCh2 raftkv.NotifyChannel
 	var client2 *raftkv.KVS
-	if len(os.Args) == 3 && os.Args[2] != "-i" {
+	if len(os.Args) == 4 && os.Args[3] == "-t" {
 		clientIdx2, err := strconv.Atoi(os.Args[2])
 		util.CheckErr(err, "failed to parse client index")
 
@@ -74,9 +74,9 @@ func main() {
 
 	if len(os.Args) == 3 && os.Args[2] == "-i" {
 		runInteractiveClient(client, notifCh)
-	} else if len(os.Args) == 4 && os.Args[3] != "-t" {
+	} else if len(os.Args) == 4 && os.Args[3] == "-t" {
 		runTwoClientsTestScript(client, notifCh, client2, notifCh2)
-	} else if len(os.Args) == 3 && os.Args[3] != "-o" {
+	} else if len(os.Args) == 3 && os.Args[2] == "-o" {
 		runTestScript(client, notifCh)
 	}
 }
