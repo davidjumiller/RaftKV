@@ -9,6 +9,8 @@ In the project, we present a distributed key value store which uses Raft as back
 
 [Project Report](https://docs.google.com/document/d/1qoafSMMeXFOkbtHBCqcp3mrYMhMvkhB_bBF4Q-alhxo/edit?usp=sharing)
 
+The pdf version of proposal and report are under report/. It might not be the most up-to-date one so the google docs is more preferable.
+
 There are also some shiviz logs that can used for visulization in the docs/
 
 We would like to give credit to the various resources online about raft implmentations and distributed kv systems:
