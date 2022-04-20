@@ -231,8 +231,6 @@ func (d *KVS) sendGet(getArgs *util.GetArgs, trace *tracing.Trace) {
 			// Successful reply
 			d.getReceived(getResult)
 			d.QueuedOps[getArgs.Key].Remove(d.QueuedOps[getArgs.Key].Front())
-			// Send next request in the queue for that key
-			go d.nextOp(getArgs.Key)
 		}
 	case <-time.After(timeout):
 		// Timeout -- assume server has failed and try a different one
@@ -282,8 +280,6 @@ func (d *KVS) sendPut(trace *tracing.Trace, localOpId uint8, putArgs *util.PutAr
 			// Successful reply
 			d.putReceived(putResult)
 			d.QueuedOps[putArgs.Key].Remove(d.QueuedOps[putArgs.Key].Front())
-			// Send next request if one has been queued for that key
-			go d.nextOp(putArgs.Key)
 		}
 	case <-time.After(timeout):
 		// Timeout -- assume server has failed and try a different one
@@ -332,10 +328,45 @@ func (d *KVS) nextOp(key string) {
 		if put, ok := op.Args.(*util.PutArgs); ok {
 			d.sendPut(op.Trace, put.OpId, put)
 		} else if get, ok := op.Args.(*util.GetArgs); ok {
-			d.sendGet(get, op.Trace)
+			// Send this get, and subsequent get requests
+			d.sendGetGroup(elem, get, op, op.Trace)
+		} else {
+			// Error
+			d.QueuedOps[key].Remove(elem)
 		}
+		// Send next request if one has been queued for that key
+		go d.nextOp(key)
 	}
 	d.KeyMutex[key].Unlock()
+}
+
+// Send first get, and subsequent get requests concurrently
+func (d *KVS) sendGetGroup(firstElem *list.Element, firstGet *util.GetArgs, op *Op, trace *tracing.Trace) {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func () {
+		d.sendGet(firstGet, op.Trace)
+		wg.Done()
+	}()
+	lastOpGet := true
+	elem := firstElem.Next()
+	for elem != nil && lastOpGet == true{
+		nextOp, ok := elem.Value.(*Op)
+		if !ok {
+			return
+		}
+		get, ok := nextOp.Args.(*util.GetArgs)
+		lastOpGet = ok
+		if ok {
+			wg.Add(1)
+			go func () {
+				d.sendGet(get, nextOp.Trace)
+				wg.Done()
+			}()
+		}
+		elem = elem.Next()
+	}
+	wg.Wait()
 }
 
 // Places operation on the queue for its specific key
