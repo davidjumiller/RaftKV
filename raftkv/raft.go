@@ -782,7 +782,7 @@ func (rf *Raft) runRaft() {
 			select {
 			case <-rf.HbCh:
 			case <-rf.VoteCh:
-			case <-time.After(time.Duration(randomTimeout(800, 1000)) * time.Millisecond):
+			case <-time.After(time.Duration(randomTimeout(1600, 1800)) * time.Millisecond):
 				rf.setToCandidate(FOLLOWER)
 			}
 		case CANDIDATE:
@@ -793,7 +793,7 @@ func (rf *Raft) runRaft() {
 			// if it's this case then it's already a follower
 			case <-rf.WinElectCh:
 				rf.setToLeader()
-			case <-time.After(time.Duration(randomTimeout(800, 1000)) * time.Millisecond):
+			case <-time.After(time.Duration(randomTimeout(1600, 1800)) * time.Millisecond):
 				rf.setToCandidate(CANDIDATE)
 			}
 		case LEADER:
@@ -801,7 +801,7 @@ func (rf *Raft) runRaft() {
 			select {
 			case <-rf.StepDownCh:
 			// same as above
-			case <-time.After(400 * time.Millisecond):
+			case <-time.After(800 * time.Millisecond):
 				rf.Mutex.Lock()
 				rf.broadcastAppendEntries()
 				rf.Mutex.Unlock()
