@@ -3,6 +3,7 @@ package raftkv
 import (
 	"container/list"
 	"cs.ubc.ca/cpsc416/p1/util"
+	"errors"
 	"fmt"
 	"github.com/DistributedClocks/tracing"
 	"net/rpc"
@@ -82,31 +83,33 @@ type ResultStruct struct {
 }
 
 type KVS struct {
-	NotifyCh   NotifyChannel
-	KTrace     *tracing.Trace
-	ClientId   string
-	ServerId   int // Index of server in ServerList we are connected to
-	ServerList []string
-	Tracer     *tracing.Tracer
-	KeyMutex   map[string]*sync.Mutex // A map of keys to mutexes
-	OpMutex    *sync.Mutex
-	IndexMutex *sync.Mutex
-	QueuedOps  map[string]*list.List // A map of keys to queues. Operations are placed on these queues to ensure proper ordering
-	OpId       uint8
-	AliveCh    chan int
-	Client     *rpc.Client
+	NotifyCh        NotifyChannel
+	KTrace          *tracing.Trace
+	ClientId        string
+	ServerId        int // Index of server in ServerList we are connected to
+	ServerList      []string
+	Tracer          *tracing.Tracer
+	KeyMutex        map[string]*sync.Mutex // A map of keys to mutexes
+	OpMutex         *sync.Mutex
+	IndexMutex      *sync.Mutex
+	ConnectionMutex *sync.RWMutex
+	QueuedOps       map[string]*list.List // A map of keys to queues. Operations are placed on these queues to ensure proper ordering
+	OpId            uint8
+	AliveCh         chan int
+	Client          *rpc.Client
 }
 
 func NewKVS() *KVS {
 	return &KVS{
-		NotifyCh:   nil,
-		ServerId:   0,
-		KeyMutex:   make(map[string]*sync.Mutex),
-		OpMutex:    new(sync.Mutex),
-		IndexMutex: new(sync.Mutex),
-		QueuedOps:  make(map[string]*list.List),
-		OpId:       1,
-		AliveCh:    make(chan int),
+		NotifyCh:        nil,
+		ServerId:        0,
+		KeyMutex:        make(map[string]*sync.Mutex),
+		OpMutex:         new(sync.Mutex),
+		IndexMutex:      new(sync.Mutex),
+		ConnectionMutex: new(sync.RWMutex),
+		QueuedOps:       make(map[string]*list.List),
+		OpId:            1,
+		AliveCh:         make(chan int),
 	}
 }
 
@@ -209,7 +212,7 @@ func (d *KVS) createGetArgs(key string, localOpId uint8) (*util.GetArgs, *tracin
 }
 
 // Sends a Get request to a server and prepares to receive the result
-func (d *KVS) sendGet(getArgs *util.GetArgs, trace *tracing.Trace) {
+func (d *KVS) sendGet(getArgs *util.GetArgs, trace *tracing.Trace) error {
 	trace.RecordAction(GetSend{getArgs.ClientId, d.ServerId, getArgs.OpId, getArgs.Key})
 	getArgs.GToken = trace.GenerateToken()
 
@@ -220,22 +223,29 @@ func (d *KVS) sendGet(getArgs *util.GetArgs, trace *tracing.Trace) {
 		Value:    "",
 		GToken:   nil,
 	}
+
+	d.ConnectionMutex.RLock()
+	defer d.ConnectionMutex.RUnlock()
+
+	if d.Client == nil {
+		return errors.New("Server Connection Dropped")
+	}
+
 	res := d.Client.Go("KVServer.Get", getArgs, getResult, nil)
 	select {
 	case call := <-res.Done:
 		if call.Error != nil {
 			// Server Error -- assume server has failed and try a different one
-			d.tryNextServer()
-			d.sendGet(getArgs, trace)
+			return errors.New("Server Error")
 		} else {
 			// Successful reply
 			d.getReceived(getResult)
 			d.QueuedOps[getArgs.Key].Remove(d.QueuedOps[getArgs.Key].Front())
+			return nil
 		}
 	case <-time.After(timeout):
 		// Timeout -- assume server has failed and try a different one
-		d.tryNextServer()
-		d.sendGet(getArgs, trace)
+		return errors.New("Server Timeout")
 	}
 }
 
@@ -257,7 +267,7 @@ func (d *KVS) getReceived(getResult *util.GetRes) {
 }
 
 // Sends a put to the server and waits for a result
-func (d *KVS) sendPut(trace *tracing.Trace, localOpId uint8, putArgs *util.PutArgs) {
+func (d *KVS) sendPut(trace *tracing.Trace, localOpId uint8, putArgs *util.PutArgs) error {
 
 	trace.RecordAction(PutSend{putArgs.ClientId, d.ServerId, putArgs.OpId, putArgs.Key, putArgs.Value})
 	putArgs.PToken = trace.GenerateToken()
@@ -269,22 +279,29 @@ func (d *KVS) sendPut(trace *tracing.Trace, localOpId uint8, putArgs *util.PutAr
 		Value:    "",
 		PToken:   nil,
 	}
+
+	d.ConnectionMutex.RLock()
+	defer d.ConnectionMutex.RUnlock()
+
+	if d.Client == nil {
+		return errors.New("Server Connection Dropped")
+	}
+
 	res := d.Client.Go("KVServer.Put", putArgs, putResult, nil)
 	select {
 	case call := <-res.Done:
 		if call.Error != nil {
 			// Server Error -- assume server has failed and try a different one
-			d.tryNextServer()
-			d.sendPut(trace, localOpId, putArgs)
+			return errors.New("Server Error")
 		} else {
 			// Successful reply
 			d.putReceived(putResult)
 			d.QueuedOps[putArgs.Key].Remove(d.QueuedOps[putArgs.Key].Front())
+			return nil
 		}
 	case <-time.After(timeout):
 		// Timeout -- assume server has failed and try a different one
-		d.tryNextServer()
-		d.sendPut(trace, localOpId, putArgs)
+		return errors.New("Server Timeout")
 	}
 }
 
@@ -326,7 +343,12 @@ func (d *KVS) nextOp(key string) {
 		}
 		// Check the type of operation
 		if put, ok := op.Args.(*util.PutArgs); ok {
-			d.sendPut(op.Trace, put.OpId, put)
+			// Send once, keep resending if there is an error
+			err := d.sendPut(op.Trace, put.OpId, put)
+			for err != nil {
+				d.tryNextServer()
+				err = d.sendPut(op.Trace, put.OpId, put)
+			}
 		} else if get, ok := op.Args.(*util.GetArgs); ok {
 			// Send this get, and subsequent get requests
 			d.sendGetGroup(elem, get, op, op.Trace)
@@ -344,13 +366,18 @@ func (d *KVS) nextOp(key string) {
 func (d *KVS) sendGetGroup(firstElem *list.Element, firstGet *util.GetArgs, op *Op, trace *tracing.Trace) {
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go func () {
-		d.sendGet(firstGet, op.Trace)
+	go func() {
+		// Send once, keep resending if there is an error
+		err := d.sendGet(firstGet, op.Trace)
+		for err != nil {
+			d.tryNextServer()
+			err = d.sendGet(firstGet, op.Trace)
+		}
 		wg.Done()
 	}()
 	lastOpGet := true
 	elem := firstElem.Next()
-	for elem != nil && lastOpGet == true{
+	for elem != nil && lastOpGet == true {
 		nextOp, ok := elem.Value.(*Op)
 		if !ok {
 			return
@@ -359,8 +386,12 @@ func (d *KVS) sendGetGroup(firstElem *list.Element, firstGet *util.GetArgs, op *
 		lastOpGet = ok
 		if ok {
 			wg.Add(1)
-			go func () {
-				d.sendGet(get, nextOp.Trace)
+			go func() {
+				// Send once, keep resending if there is an error
+				err := d.sendGet(get, nextOp.Trace)
+				for err != nil {
+					d.tryNextServer()
+				}
 				wg.Done()
 			}()
 		}
@@ -395,7 +426,7 @@ func (d *KVS) nextOpId() uint8 {
 	return localOpId
 }
 
-func (d *KVS) connectToServer() {
+func (d *KVS) connectToServer() error {
 	d.IndexMutex.Lock()
 	serverAddr := d.ServerList[d.ServerId]
 	if d.Client != nil {
@@ -407,16 +438,27 @@ func (d *KVS) connectToServer() {
 	if err != nil {
 		// Keep trying next server indefinitely
 		fmt.Println("Could not connect to", serverAddr)
-		d.tryNextServer()
+		return errors.New("Could not connect to server")
 	} else {
 		d.KTrace.RecordAction(NewServerConnection{d.ClientId, d.ServerId, serverAddr})
 	}
+	return nil
 }
 
 // attempts to connect to next server on the list
 func (d *KVS) tryNextServer() {
+	d.ConnectionMutex.Lock()
+	defer d.ConnectionMutex.Unlock()
+
 	d.IndexMutex.Lock()
 	d.ServerId = (d.ServerId + 1) % len(d.ServerList)
 	d.IndexMutex.Unlock()
-	d.connectToServer()
+
+	err := d.connectToServer()
+	for err != nil {
+		d.IndexMutex.Lock()
+		d.ServerId = (d.ServerId + 1) % len(d.ServerList)
+		d.IndexMutex.Unlock()
+		err = d.connectToServer()
+	}
 }
