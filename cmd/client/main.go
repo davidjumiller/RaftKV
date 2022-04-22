@@ -2,14 +2,15 @@ package main
 
 import (
 	"bufio"
-	"cs.ubc.ca/cpsc416/p1/raftkv"
-	"cs.ubc.ca/cpsc416/p1/util"
 	"fmt"
-	"github.com/DistributedClocks/tracing"
 	"log"
 	"os"
 	"strconv"
 	"strings"
+
+	"cs.ubc.ca/cpsc416/p1/raftkv"
+	"cs.ubc.ca/cpsc416/p1/util"
+	"github.com/DistributedClocks/tracing"
 )
 
 type ClientConfig struct {
@@ -32,7 +33,8 @@ func main() {
 	clientIdx, err := strconv.Atoi(os.Args[1])
 	util.CheckErr(err, "failed to parse client index")
 
-	filename := fmt.Sprintf("./config/client_config_%d.json", clientIdx)
+	// filename := fmt.Sprintf("./config/client_config_%d.json", clientIdx)
+	filename := "./config/client_config.json"
 	fmt.Println("Client config file:", filename)
 	var config ClientConfig
 	err = util.ReadJSONConfig(filename, &config)
@@ -40,12 +42,12 @@ func main() {
 
 	tracer := tracing.NewTracer(tracing.TracerConfig{
 		ServerAddress:  config.TracingServerAddr,
-		TracerIdentity: config.TracingIdentity,
+		TracerIdentity: fmt.Sprintf("client%d", clientIdx),
 		Secret:         config.Secret,
 	})
 
 	client := raftkv.NewKVS()
-	notifCh, err := client.Start(tracer, config.ClientID, config.ServerIPPortList, config.ChCapacity)
+	notifCh, err := client.Start(tracer, fmt.Sprintf("client%d", clientIdx), config.ServerIPPortList, config.ChCapacity)
 	util.CheckErr(err, "Error reading client config: %v\n", err)
 
 	// Setup second client if there's one
@@ -55,7 +57,7 @@ func main() {
 		clientIdx2, err := strconv.Atoi(os.Args[2])
 		util.CheckErr(err, "failed to parse client index")
 
-		filename := fmt.Sprintf("./config/client_config_%d.json", clientIdx2)
+		filename := "./config/client_config.json"
 		fmt.Println("Client config file:", filename)
 		var config ClientConfig
 		err = util.ReadJSONConfig(filename, &config)
@@ -63,12 +65,12 @@ func main() {
 
 		tracer := tracing.NewTracer(tracing.TracerConfig{
 			ServerAddress:  config.TracingServerAddr,
-			TracerIdentity: config.TracingIdentity,
+			TracerIdentity: fmt.Sprintf("client%d", clientIdx2),
 			Secret:         config.Secret,
 		})
-		
+
 		client2 = raftkv.NewKVS()
-		notifCh2, err = client2.Start(tracer, config.ClientID, config.ServerIPPortList, config.ChCapacity)
+		notifCh2, err = client2.Start(tracer, fmt.Sprintf("client%d", clientIdx2), config.ServerIPPortList, config.ChCapacity)
 		util.CheckErr(err, "Error reading client config: %v\n", err)
 	}
 

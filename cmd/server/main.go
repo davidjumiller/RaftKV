@@ -16,7 +16,8 @@ func main() {
 	util.CheckErr(err, "failed to parse server index")
 
 	// Read server config
-	filename := fmt.Sprintf("./config/server_config_%d.json", serverIdx)
+	// filename := fmt.Sprintf("./config/server_config_%d.json", serverIdx)
+	filename := "./config/server_config.json"
 	fmt.Println("Server config file:", filename)
 	var config raftkv.KVServerConfig
 	err = util.ReadJSONConfig(filename, &config)
