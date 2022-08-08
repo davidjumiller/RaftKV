@@ -1,7 +1,4 @@
-# cpsc416_proj_jepson_kevl99_aimyul_djumaoas_ubcars_caliu17
-
-
-## CPSC 416 Project: RaftKV
+# RaftKV - A distributed key-value data store, created for CPSC 416
 
 In the project, we present a distributed key value store which uses Raft as backbone support for providing consensus and failure handling. The application will handle common failures like network partition or node failure, and only fail to respond when the majority of all working servers fail. It should also be able to handle new server join or a scenario of rejoining when previously failed servers are back online.
 
